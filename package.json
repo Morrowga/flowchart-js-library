@@ -1,0 +1,39 @@
+{
+  "name": "flowchart-lib",
+  "version": "1.0.0",
+  "description": "A lightweight flowchart library for creating interactive flowcharts",
+  "main": "dist/flowchart-lib.js",
+  "module": "dist/flowchart-lib.esm.js",
+  "browser": "dist/flowchart-lib.umd.js",
+  "unpkg": "dist/flowchart-lib.umd.min.js",
+  "jsdelivr": "dist/flowchart-lib.umd.min.js",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js && npm run serve",
+    "serve": "npx serve examples",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "flowchart",
+    "diagram",
+    "canvas",
+    "visualization",
+    "workflow",
+    "drawing"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/flowchart-lib.git"
+  },
+  "devDependencies": {
+    "terser": "^5.44.0"
+  }
+}
