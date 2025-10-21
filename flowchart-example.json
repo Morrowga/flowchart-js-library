@@ -1,0 +1,54 @@
+{
+  "nodes": [
+    {
+      "id": "node-0",
+      "type": "start",
+      "x": 190.5,
+      "y": 179.5,
+      "text": "node 1",
+      "width": 103,
+      "height": 85
+    },
+    {
+      "id": "node-1",
+      "type": "process",
+      "x": 641.5,
+      "y": 424.5,
+      "text": "Node 2",
+      "width": 225,
+      "height": 83
+    },
+    {
+      "id": "node-3",
+      "type": "decision",
+      "x": 710,
+      "y": 116.5,
+      "text": "Node 3",
+      "width": 200,
+      "height": 103
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-0",
+      "fromNodeId": "node-0",
+      "fromPort": "right",
+      "toNodeId": "node-1",
+      "toPort": "left"
+    },
+    {
+      "id": "conn-1",
+      "fromNodeId": "node-0",
+      "fromPort": "top",
+      "toNodeId": "node-3",
+      "toPort": "left"
+    },
+    {
+      "id": "conn-2",
+      "fromNodeId": "node-1",
+      "fromPort": "top",
+      "toNodeId": "node-3",
+      "toPort": "bottom"
+    }
+  ]
+}
