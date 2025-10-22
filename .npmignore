@@ -1,0 +1,17 @@
+# Development files
+src/
+examples/
+node_modules/
+.git/
+.gitignore
+
+# Build files
+build.js
+
+# Documentation
+*.md
+!README.md
+
+# OS files
+.DS_Store
+Thumbs.db

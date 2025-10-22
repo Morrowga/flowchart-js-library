@@ -1,5 +1,5 @@
 {
-  "name": "@yourusername/flowchart-lib",
+  "name": "@thihaeung/flowchart-lib",
   "version": "1.0.0",
   "description": "A lightweight flowchart library for creating interactive flowcharts",
   "main": "dist/flowchart-lib.js",
