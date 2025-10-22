@@ -1,5 +1,5 @@
 // src/Connection.js
-// Represents a connection between two flowchart nodes
+// Represents a connection between two flowchart nodes with zoom support
 
 class Connection {
   constructor(id, fromNode, fromPort, toNode, toPort) {
@@ -34,15 +34,16 @@ class Connection {
   // Point Detection
   // ============================================================================
 
-  isNearPoint(x, y, threshold = 15) {
+  isNearPoint(x, y, zoom = 1, threshold = 15) {
+    const adjustedThreshold = threshold / zoom;
     const start = this.getPortPosition(this.fromNode, this.fromPort);
     const end = this.getPortPosition(this.toNode, this.toPort);
     
     // Check if near start or end point
-    if (this.distanceToPoint(x, y, start.x, start.y) < threshold) {
+    if (this.distanceToPoint(x, y, start.x, start.y) < adjustedThreshold) {
       return true;
     }
-    if (this.distanceToPoint(x, y, end.x, end.y) < threshold) {
+    if (this.distanceToPoint(x, y, end.x, end.y) < adjustedThreshold) {
       return true;
     }
     
@@ -52,11 +53,11 @@ class Connection {
     // Check middle area (for curved lines)
     const midX = (start.x + end.x) / 2;
     const midY = (start.y + end.y) / 2;
-    if (this.distanceToPoint(x, y, midX, midY) < threshold * 2) {
+    if (this.distanceToPoint(x, y, midX, midY) < adjustedThreshold * 2) {
       return true;
     }
     
-    return dist < threshold;
+    return dist < adjustedThreshold;
   }
 
   distanceToPoint(x1, y1, x2, y2) {
@@ -98,8 +99,6 @@ class Connection {
     
     // Draw the connection line
     this.drawConnectionLine(ctx, start, end);
-    
-    // Arrow head removed - no longer drawing it
     
     ctx.restore();
   }
@@ -146,41 +145,6 @@ class Connection {
     const dx = Math.abs(end.x - start.x);
     const dy = Math.abs(end.y - start.y);
     return dx > 50 || dy > 50;
-  }
-  
-  drawArrowHead(ctx, start, end) {
-    const angle = Math.atan2(end.y - start.y, end.x - start.x);
-    const arrowLength = 12;
-    
-    // Adjust arrow angle based on which port we're connecting to
-    let arrowAngle = angle;
-    switch(this.toPort) {
-      case 'right':
-        arrowAngle = 0;
-        break;
-      case 'left':
-        arrowAngle = Math.PI;
-        break;
-      case 'top':
-        arrowAngle = -Math.PI / 2;
-        break;
-      case 'bottom':
-        arrowAngle = Math.PI / 2;
-        break;
-    }
-    
-    ctx.beginPath();
-    ctx.moveTo(end.x, end.y);
-    ctx.lineTo(
-      end.x - arrowLength * Math.cos(arrowAngle - Math.PI / 6),
-      end.y - arrowLength * Math.sin(arrowAngle - Math.PI / 6)
-    );
-    ctx.lineTo(
-      end.x - arrowLength * Math.cos(arrowAngle + Math.PI / 6),
-      end.y - arrowLength * Math.sin(arrowAngle + Math.PI / 6)
-    );
-    ctx.closePath();
-    ctx.fill();
   }
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "flowchart-lib",
+  "name": "@yourusername/flowchart-lib",
   "version": "1.0.0",
   "description": "A lightweight flowchart library for creating interactive flowcharts",
   "main": "dist/flowchart-lib.js",
@@ -7,9 +7,9 @@
   "browser": "dist/flowchart-lib.umd.js",
   "unpkg": "dist/flowchart-lib.umd.min.js",
   "jsdelivr": "dist/flowchart-lib.umd.min.js",
+  "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "src",
     "README.md",
     "LICENSE"
   ],
@@ -25,14 +25,20 @@
     "canvas",
     "visualization",
     "workflow",
-    "drawing"
+    "drawing",
+    "electron",
+    "vue"
   ],
-  "author": "Your Name",
+  "author": "Thi Ha Aung <mr.alvin199818@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/flowchart-lib.git"
+    "url": "https://github.com/Morrowga/flowchart-js-library.git"
   },
+  "bugs": {
+    "url": "https://github.com/Morrowga/flowchart-js-library.git/issues"
+  },
+  "homepage": "https://github.com/Morrowga/flowchart-js-library.git",
   "devDependencies": {
     "terser": "^5.44.0"
   }

@@ -1,5 +1,5 @@
 // src/Node.js
-// Represents a single flowchart node
+// Represents a single flowchart node with zoom support
 
 class Node {
   constructor(id, type, x, y, text = '') {
@@ -24,22 +24,26 @@ class Node {
            y <= this.y + this.height / 2;
   }
 
-  isOnConnectionPoint(x, y) {
+  isOnConnectionPoint(x, y, zoom = 1) {
     const points = this.getConnectionPoints();
+    const threshold = 10 / zoom; // Adjust threshold based on zoom
+    
     for (let point of points) {
       const distance = Math.sqrt((x - point.x) ** 2 + (y - point.y) ** 2);
-      if (distance < 10) {
+      if (distance < threshold) {
         return point;
       }
     }
     return null;
   }
 
-  isOnResizeHandle(x, y) {
+  isOnResizeHandle(x, y, zoom = 1) {
     const handles = this.getResizeHandles();
+    const threshold = 8 / zoom; // Adjust threshold based on zoom
+    
     for (let handle of handles) {
       const distance = Math.sqrt((x - handle.x) ** 2 + (y - handle.y) ** 2);
-      if (distance < 8) {
+      if (distance < threshold) {
         return handle;
       }
     }

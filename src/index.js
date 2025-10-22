@@ -1,5 +1,5 @@
 // src/index.js
-// Main flowchart canvas class with fullscreen support
+// Main flowchart canvas class with pan/zoom support
 import Node from './Node.js';
 import Connection from './Connection.js';
 
@@ -14,11 +14,21 @@ class FlowchartCanvas {
     // Configuration options
     this.options = {
       mode: options.mode || 'edit',
-      width: options.width || null,  // null = auto-size to container
+      width: options.width || null,
       height: options.height || null,
       readonly: options.readonly || false,
-      pixelRatio: options.pixelRatio || window.devicePixelRatio || 1
+      pixelRatio: options.pixelRatio || window.devicePixelRatio || 1,
+      minZoom: options.minZoom || 0.1,
+      maxZoom: options.maxZoom || 5
     };
+
+    // Pan and Zoom state
+    this.panX = 0;
+    this.panY = 0;
+    this.zoom = 1;
+    this.isPanning = false;
+    this.panStartX = 0;
+    this.panStartY = 0;
 
     // Node and connection storage
     this.nodes = [];
@@ -83,13 +93,19 @@ class FlowchartCanvas {
   // ============================================================================
   
   init() {  
+    // Ensure container can hold full-size canvas
+    this.container.style.position = this.container.style.position || 'relative';
+    this.container.style.width = this.container.style.width || '100%';
+    this.container.style.height = this.container.style.height || '100%';
+    
     // Create canvas element
     this.canvas = document.createElement('canvas');
     this.canvas.style.border = '1px solid #ccc';
-    this.canvas.style.cursor = 'default';
+    this.canvas.style.cursor = 'grab';
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
     this.canvas.style.display = 'block';
+    this.canvas.style.boxSizing = 'border-box';
     
     this.ctx = this.canvas.getContext('2d');
     this.container.appendChild(this.canvas);
@@ -103,14 +119,16 @@ class FlowchartCanvas {
       this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
       this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
       this.canvas.addEventListener('dblclick', (e) => this.handleDoubleClick(e));
+      this.canvas.addEventListener('wheel', (e) => this.handleWheel(e));
+      this.canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent right-click menu
       document.addEventListener('keydown', (e) => this.handleKeyDown(e));
+      document.addEventListener('keyup', (e) => this.handleKeyUp(e));
     }
     
     this.render();
   }
 
   setupResizeObserver() {
-    // Use ResizeObserver to handle container size changes
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => {
         this.updateCanvasSize();
@@ -118,7 +136,6 @@ class FlowchartCanvas {
       });
       this.resizeObserver.observe(this.container);
     } else {
-      // Fallback for older browsers
       window.addEventListener('resize', () => {
         this.updateCanvasSize();
         this.render();
@@ -129,25 +146,95 @@ class FlowchartCanvas {
   updateCanvasSize() {
     const rect = this.container.getBoundingClientRect();
     
-    // Get display size (CSS pixels)
     const displayWidth = this.options.width || rect.width;
     const displayHeight = this.options.height || rect.height;
     
-    // Set canvas internal size (accounting for device pixel ratio for crisp rendering)
     const pixelRatio = this.options.pixelRatio;
     this.canvas.width = displayWidth * pixelRatio;
     this.canvas.height = displayHeight * pixelRatio;
     
-    // Set display size (CSS pixels)
     this.canvas.style.width = displayWidth + 'px';
     this.canvas.style.height = displayHeight + 'px';
-    
-    // Scale context to match device pixel ratio
-    this.ctx.scale(pixelRatio, pixelRatio);
     
     // Store logical dimensions for coordinate calculations
     this.logicalWidth = displayWidth;
     this.logicalHeight = displayHeight;
+  }
+
+  // ============================================================================
+  // Pan & Zoom Methods
+  // ============================================================================
+
+  screenToWorld(screenX, screenY) {
+    // Convert screen coordinates to world coordinates
+    return {
+      x: (screenX - this.panX) / this.zoom,
+      y: (screenY - this.panY) / this.zoom
+    };
+  }
+
+  worldToScreen(worldX, worldY) {
+    // Convert world coordinates to screen coordinates
+    return {
+      x: worldX * this.zoom + this.panX,
+      y: worldY * this.zoom + this.panY
+    };
+  }
+
+  zoomAt(x, y, delta) {
+    // Zoom centered at point (x, y)
+    const worldPosBefore = this.screenToWorld(x, y);
+    
+    const zoomFactor = delta > 0 ? 1.1 : 0.9;
+    this.zoom = Math.max(
+      this.options.minZoom,
+      Math.min(this.options.maxZoom, this.zoom * zoomFactor)
+    );
+    
+    const worldPosAfter = this.screenToWorld(x, y);
+    
+    // Adjust pan to keep the point under cursor
+    this.panX += (worldPosAfter.x - worldPosBefore.x) * this.zoom;
+    this.panY += (worldPosAfter.y - worldPosBefore.y) * this.zoom;
+  }
+
+  resetView() {
+    this.panX = 0;
+    this.panY = 0;
+    this.zoom = 1;
+    this.render();
+  }
+
+  fitToContent() {
+    if (this.nodes.length === 0) return;
+    
+    // Calculate bounding box
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+    
+    for (let node of this.nodes) {
+      minX = Math.min(minX, node.x - node.width / 2);
+      minY = Math.min(minY, node.y - node.height / 2);
+      maxX = Math.max(maxX, node.x + node.width / 2);
+      maxY = Math.max(maxY, node.y + node.height / 2);
+    }
+    
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const padding = 50;
+    
+    // Calculate zoom to fit
+    const zoomX = (this.logicalWidth - padding * 2) / contentWidth;
+    const zoomY = (this.logicalHeight - padding * 2) / contentHeight;
+    this.zoom = Math.min(zoomX, zoomY, 1);
+    
+    // Center content
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    this.panX = this.logicalWidth / 2 - centerX * this.zoom;
+    this.panY = this.logicalHeight / 2 - centerY * this.zoom;
+    
+    this.render();
   }
 
   // ============================================================================
@@ -156,6 +243,12 @@ class FlowchartCanvas {
   
   addNode(type, text, x, y) {
     const id = `node-${this.nodeIdCounter++}`;
+    // If x and y are not provided, add node at center of viewport
+    if (x === undefined || y === undefined) {
+      const center = this.screenToWorld(this.logicalWidth / 2, this.logicalHeight / 2);
+      x = center.x;
+      y = center.y;
+    }
     const node = new Node(id, type, x, y, text);
     this.nodes.push(node);
     this.render();
@@ -169,7 +262,6 @@ class FlowchartCanvas {
       conn.fromNode !== node && conn.toNode !== node
     );
     
-    // Remove the node
     this.nodes = this.nodes.filter(n => n !== node);
     this.selectedNode = null;
     this.render();
@@ -181,14 +273,20 @@ class FlowchartCanvas {
   // ============================================================================
 
   addConnection(fromNode, fromPort, toNode, toPort) {
-    // Check if connection already exists
+    // Prevent self-connections
+    if (fromNode === toNode) {
+      return null;
+    }
+    
+    // Check if exact connection already exists
     for (let conn of this.connections) {
       if (conn.fromNode === fromNode && conn.toNode === toNode &&
           conn.fromPort === fromPort && conn.toPort === toPort) {
-        return null;
+        return null; // Connection already exists
       }
     }
     
+    // Create new connection (allows multiple connections from same node)
     const id = `conn-${this.connectionIdCounter++}`;
     const connection = new Connection(id, fromNode, fromPort, toNode, toPort);
     this.connections.push(connection);
@@ -204,20 +302,20 @@ class FlowchartCanvas {
     this.saveState();
   }
 
-  getConnectionEndpointAt(x, y, threshold = 15) {
+  getConnectionEndpointAt(worldX, worldY, threshold = 15) {
+    const screenThreshold = threshold / this.zoom;
+    
     for (let conn of this.connections) {
       const start = conn.getPortPosition(conn.fromNode, conn.fromPort);
       const end = conn.getPortPosition(conn.toNode, conn.toPort);
       
-      // Check start point
-      const distToStart = Math.sqrt((x - start.x) ** 2 + (y - start.y) ** 2);
-      if (distToStart < threshold) {
+      const distToStart = Math.sqrt((worldX - start.x) ** 2 + (worldY - start.y) ** 2);
+      if (distToStart < screenThreshold) {
         return { connection: conn, endpoint: 'start' };
       }
       
-      // Check end point
-      const distToEnd = Math.sqrt((x - end.x) ** 2 + (y - end.y) ** 2);
-      if (distToEnd < threshold) {
+      const distToEnd = Math.sqrt((worldX - end.x) ** 2 + (worldY - end.y) ** 2);
+      if (distToEnd < screenThreshold) {
         return { connection: conn, endpoint: 'end' };
       }
     }
@@ -230,9 +328,22 @@ class FlowchartCanvas {
   // ============================================================================
   
   render() {
-    // Clear canvas
+    const pixelRatio = this.options.pixelRatio;
+    
+    // Reset transform and clear canvas
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    
+    // Apply pixel ratio for crisp rendering
+    this.ctx.scale(pixelRatio, pixelRatio);
+    
+    // Fill background
     this.ctx.fillStyle = '#f9f9f9';
     this.ctx.fillRect(0, 0, this.logicalWidth, this.logicalHeight);
+    
+    // Apply pan and zoom transform
+    this.ctx.translate(this.panX, this.panY);
+    this.ctx.scale(this.zoom, this.zoom);
     
     // Draw grid
     this.drawGrid();
@@ -241,7 +352,6 @@ class FlowchartCanvas {
     for (let conn of this.connections) {
       const isSelected = conn === this.selectedConnection;
       
-      // Skip if we're reconnecting this connection
       if (this.isReconnecting && conn === this.reconnectingConnection) {
         continue;
       }
@@ -254,7 +364,7 @@ class FlowchartCanvas {
       this.drawReconnectionPreview();
     }
     
-    // Draw temporary connection line while creating new connection
+    // Draw temporary connection line
     if (this.isConnecting && this.connectionStart && this.tempConnectionEnd) {
       this.drawConnectionPreview();
     }
@@ -265,33 +375,69 @@ class FlowchartCanvas {
       node.draw(this.ctx, isSelected);
     }
     
+    // Reset transform for UI elements
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.scale(pixelRatio, pixelRatio);
+    
+    // Show helper text and zoom info
+    this.drawUIOverlay();
+  }
+  
+  drawGrid() {
+    const gridSize = 20;
+    const worldBounds = {
+      left: this.screenToWorld(0, 0).x,
+      top: this.screenToWorld(0, 0).y,
+      right: this.screenToWorld(this.logicalWidth, this.logicalHeight).x,
+      bottom: this.screenToWorld(this.logicalWidth, this.logicalHeight).y
+    };
+    
+    this.ctx.strokeStyle = '#e0e0e0';
+    this.ctx.lineWidth = 1 / this.zoom;
+    
+    const startX = Math.floor(worldBounds.left / gridSize) * gridSize;
+    const endX = Math.ceil(worldBounds.right / gridSize) * gridSize;
+    const startY = Math.floor(worldBounds.top / gridSize) * gridSize;
+    const endY = Math.ceil(worldBounds.bottom / gridSize) * gridSize;
+    
+    // Vertical lines
+    for (let x = startX; x <= endX; x += gridSize) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(x, worldBounds.top);
+      this.ctx.lineTo(x, worldBounds.bottom);
+      this.ctx.stroke();
+    }
+    
+    // Horizontal lines
+    for (let y = startY; y <= endY; y += gridSize) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(worldBounds.left, y);
+      this.ctx.lineTo(worldBounds.right, y);
+      this.ctx.stroke();
+    }
+  }
+
+  drawUIOverlay() {
+    // Show zoom level and instructions
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    this.ctx.fillRect(10, 10, 220, 100);
+    
+    this.ctx.fillStyle = '#fff';
+    this.ctx.font = '12px Arial';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText(`Zoom: ${(this.zoom * 100).toFixed(0)}%`, 20, 30);
+    this.ctx.fillText(`Pan: (${Math.round(this.panX)}, ${Math.round(this.panY)})`, 20, 50);
+    this.ctx.fillText('Drag Empty Space: Pan', 20, 70);
+    this.ctx.fillText('Scroll: Zoom', 20, 85);
+    this.ctx.fillText('Ctrl+0: Reset | Ctrl+1: Fit', 20, 100);
+    
     // Show helper text if no nodes
     if (this.nodes.length === 0) {
       this.ctx.fillStyle = '#999';
       this.ctx.font = '16px Arial';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText('Click buttons below to add nodes', this.logicalWidth / 2, this.logicalHeight / 2);
-    }
-  }
-  
-  drawGrid() {
-    this.ctx.strokeStyle = '#e0e0e0';
-    this.ctx.lineWidth = 1;
-    
-    // Vertical lines
-    for (let x = 0; x < this.logicalWidth; x += 20) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(x, 0);
-      this.ctx.lineTo(x, this.logicalHeight);
-      this.ctx.stroke();
-    }
-    
-    // Horizontal lines
-    for (let y = 0; y < this.logicalHeight; y += 20) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(0, y);
-      this.ctx.lineTo(this.logicalWidth, y);
-      this.ctx.stroke();
+      this.ctx.fillText('Add nodes using buttons below', this.logicalWidth / 2, this.logicalHeight / 2);
+      this.ctx.fillText('Drag empty space to pan, scroll to zoom', this.logicalWidth / 2, this.logicalHeight / 2 + 25);
     }
   }
 
@@ -308,7 +454,7 @@ class FlowchartCanvas {
     }
     
     this.ctx.strokeStyle = '#000';
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = 2 / this.zoom;
     this.ctx.setLineDash([]);
     this.ctx.beginPath();
     this.ctx.moveTo(startPos.x, startPos.y);
@@ -322,7 +468,7 @@ class FlowchartCanvas {
     );
     
     this.ctx.strokeStyle = '#000';
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = 2 / this.zoom;
     this.ctx.setLineDash([]);
     this.ctx.beginPath();
     this.ctx.moveTo(startPos.x, startPos.y);
@@ -335,6 +481,8 @@ class FlowchartCanvas {
     this.connections = [];
     this.selectedNode = null;
     this.selectedConnection = null;
+    this.nodeIdCounter = 0;
+    this.connectionIdCounter = 0;
     this.render();
   }
 
@@ -344,102 +492,141 @@ class FlowchartCanvas {
 
   getMousePos(e) {
     const rect = this.canvas.getBoundingClientRect();
-    // Calculate position based on CSS display size
     const scaleX = this.logicalWidth / rect.width;
     const scaleY = this.logicalHeight / rect.height;
     
+    const screenX = (e.clientX - rect.left) * scaleX;
+    const screenY = (e.clientY - rect.top) * scaleY;
+    
+    // Return both screen and world coordinates
+    const world = this.screenToWorld(screenX, screenY);
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      screen: { x: screenX, y: screenY },
+      world: { x: world.x, y: world.y }
     };
+  }
+
+  handleWheel(e) {
+    e.preventDefault();
+    
+    const pos = this.getMousePos(e);
+    this.zoomAt(pos.screen.x, pos.screen.y, -e.deltaY);
+    this.render();
   }
 
   handleMouseDown(e) {
     const pos = this.getMousePos(e);
-    const x = pos.x;
-    const y = pos.y;
+    const worldX = pos.world.x;
+    const worldY = pos.world.y;
+    
+    // Middle mouse button = always pan
+    if (e.button === 1) {
+      this.startPanning(pos.screen.x, pos.screen.y);
+      e.preventDefault();
+      return;
+    }
+    
+    // Left click only
+    if (e.button !== 0) return;
     
     // Check resize handles first
     if (this.selectedNode) {
-      const handle = this.selectedNode.isOnResizeHandle(x, y);
+      const handle = this.selectedNode.isOnResizeHandle(worldX, worldY, this.zoom);
       if (handle) {
-        this.startResizing(handle, x, y);
+        this.startResizing(handle, worldX, worldY);
         return;
       }
     }
     
     // Check connection endpoints for reconnection
-    const endpoint = this.getConnectionEndpointAt(x, y);
+    const endpoint = this.getConnectionEndpointAt(worldX, worldY);
     if (endpoint) {
-      this.startReconnecting(endpoint, x, y);
+      this.startReconnecting(endpoint, worldX, worldY);
       return;
     }
     
     // Check connection points for new connection
     for (let node of this.nodes) {
-      const connectionPoint = node.isOnConnectionPoint(x, y);
+      const connectionPoint = node.isOnConnectionPoint(worldX, worldY, this.zoom);
       if (connectionPoint) {
-        this.startConnecting(node, connectionPoint, x, y);
+        this.startConnecting(node, connectionPoint, worldX, worldY);
         return;
       }
     }
     
     // Check if clicked on a node
+    let clickedOnNode = false;
     for (let node of this.nodes) {
-      if (node.containsPoint(x, y)) {
-        this.startDragging(node, x, y);
+      if (node.containsPoint(worldX, worldY)) {
+        this.startDragging(node, worldX, worldY);
+        clickedOnNode = true;
         return;
       }
     }
     
     // Check if clicked on a connection
     for (let conn of this.connections) {
-      if (conn.isNearPoint(x, y)) {
+      if (conn.isNearPoint(worldX, worldY, this.zoom)) {
         this.selectConnection(conn);
         return;
       }
     }
     
-    // Clicked on empty space - deselect
+    // Clicked on empty space - start panning if not on anything
+    this.startPanning(pos.screen.x, pos.screen.y);
     this.deselectAll();
   }
   
   handleMouseMove(e) {
     const pos = this.getMousePos(e);
-    const x = pos.x;
-    const y = pos.y;
+    const worldX = pos.world.x;
+    const worldY = pos.world.y;
     
-    // Handle different mouse modes
+    // Handle panning
+    if (this.isPanning) {
+      this.updatePan(pos.screen.x, pos.screen.y);
+      return;
+    }
+    
+    // Handle resizing
     if (this.isResizing) {
-      this.updateResize(x, y);
+      this.updateResize(worldX, worldY);
       return;
     }
     
+    // Handle reconnecting
     if (this.isReconnecting) {
-      this.tempConnectionEnd = { x, y };
+      this.tempConnectionEnd = { x: worldX, y: worldY };
       this.render();
       return;
     }
     
+    // Handle connecting
     if (this.isConnecting) {
-      this.tempConnectionEnd = { x, y };
+      this.tempConnectionEnd = { x: worldX, y: worldY };
       this.render();
       return;
     }
     
+    // Handle dragging
     if (this.isDragging && this.selectedNode) {
-      this.updateDrag(x, y);
+      this.updateDrag(worldX, worldY);
       return;
     }
     
-    // Update cursor based on hover state
-    this.updateCursor(x, y);
+    // Update cursor
+    this.updateCursor(worldX, worldY);
   }
   
   handleMouseUp(e) {
     const pos = this.getMousePos(e);
-    const x = pos.x;
-    const y = pos.y;
+    const worldX = pos.world.x;
+    const worldY = pos.world.y;
+    
+    if (this.isPanning) {
+      this.finishPanning();
+      return;
+    }
     
     if (this.isResizing) {
       this.finishResizing();
@@ -447,12 +634,12 @@ class FlowchartCanvas {
     }
     
     if (this.isReconnecting) {
-      this.finishReconnecting(x, y);
+      this.finishReconnecting(worldX, worldY);
       return;
     }
     
     if (this.isConnecting) {
-      this.finishConnecting(x, y);
+      this.finishConnecting(worldX, worldY);
       return;
     }
     
@@ -463,16 +650,37 @@ class FlowchartCanvas {
 
   handleDoubleClick(e) {
     const pos = this.getMousePos(e);
-    const x = pos.x;
-    const y = pos.y;
+    const worldX = pos.world.x;
+    const worldY = pos.world.y;
     
-    // Check if double-clicked on a node
     for (let node of this.nodes) {
-      if (node.containsPoint(x, y)) {
+      if (node.containsPoint(worldX, worldY)) {
         this.startEditingNode(node);
         return;
       }
     }
+  }
+
+  // ============================================================================
+  // Panning
+  // ============================================================================
+
+  startPanning(screenX, screenY) {
+    this.isPanning = true;
+    this.panStartX = screenX - this.panX;
+    this.panStartY = screenY - this.panY;
+    this.canvas.style.cursor = 'grabbing';
+  }
+
+  updatePan(screenX, screenY) {
+    this.panX = screenX - this.panStartX;
+    this.panY = screenY - this.panStartY;
+    this.render();
+  }
+
+  finishPanning() {
+    this.isPanning = false;
+    this.canvas.style.cursor = 'grab';
   }
 
   // ============================================================================
@@ -549,7 +757,7 @@ class FlowchartCanvas {
   finishResizing() {
     this.isResizing = false;
     this.resizeHandle = null;
-    this.canvas.style.cursor = 'default';
+    this.canvas.style.cursor = 'move';
     this.saveState();
   }
 
@@ -590,7 +798,7 @@ class FlowchartCanvas {
     this.reconnectingConnection = null;
     this.reconnectingEnd = null;
     this.tempConnectionEnd = null;
-    this.canvas.style.cursor = 'default';
+    this.canvas.style.cursor = 'grab';
     this.render();
   }
 
@@ -603,9 +811,11 @@ class FlowchartCanvas {
   }
 
   finishConnecting(x, y) {
+    // Look for a node at the drop location
     for (let node of this.nodes) {
       if (node !== this.connectionStart && node.containsPoint(x, y)) {
         const closestPoint = node.getClosestConnectionPoint(x, y);
+        // This will create a NEW connection (multiple connections allowed)
         this.addConnection(
           this.connectionStart, 
           this.connectionStartPort,
@@ -620,7 +830,7 @@ class FlowchartCanvas {
     this.connectionStart = null;
     this.connectionStartPort = null;
     this.tempConnectionEnd = null;
-    this.canvas.style.cursor = 'default';
+    this.canvas.style.cursor = 'grab';
     this.render();
   }
 
@@ -642,7 +852,7 @@ class FlowchartCanvas {
 
   finishDragging() {
     this.isDragging = false;
-    this.canvas.style.cursor = 'default';
+    this.canvas.style.cursor = 'move';
     this.saveState();
   }
 
@@ -659,28 +869,59 @@ class FlowchartCanvas {
   }
 
   updateCursor(x, y) {
+    // Don't change cursor during active operations
+    if (this.isPanning || this.isDragging || this.isConnecting || this.isReconnecting || this.isResizing) {
+      return;
+    }
+    
+    // Check if hovering over resize handles
     if (this.selectedNode) {
-      const handle = this.selectedNode.isOnResizeHandle(x, y);
+      const handle = this.selectedNode.isOnResizeHandle(x, y, this.zoom);
       if (handle) {
         this.canvas.style.cursor = this.getResizeCursor(handle.position);
         return;
       }
       
-      if (this.selectedNode.isOnConnectionPoint(x, y)) {
+      // Check if hovering over connection points
+      if (this.selectedNode.isOnConnectionPoint(x, y, this.zoom)) {
         this.canvas.style.cursor = 'pointer';
         return;
       }
     }
     
+    // Check if hovering over any connection points
+    for (let node of this.nodes) {
+      if (node.isOnConnectionPoint(x, y, this.zoom)) {
+        this.canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    
+    // Check if hovering over connection endpoints
     const endpoint = this.getConnectionEndpointAt(x, y);
     if (endpoint) {
       this.canvas.style.cursor = 'pointer';
       return;
     }
     
-    if (!this.isDragging && !this.isConnecting && !this.isReconnecting) {
-      this.canvas.style.cursor = 'default';
+    // Check if hovering over a node
+    for (let node of this.nodes) {
+      if (node.containsPoint(x, y)) {
+        this.canvas.style.cursor = 'move';
+        return;
+      }
     }
+    
+    // Check if hovering over a connection
+    for (let conn of this.connections) {
+      if (conn.isNearPoint(x, y, this.zoom)) {
+        this.canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    
+    // Default: empty space (can pan)
+    this.canvas.style.cursor = 'grab';
   }
 
   getResizeCursor(position) {
@@ -707,6 +948,7 @@ class FlowchartCanvas {
     node.text = '';
     this.render();
     
+    const screenPos = this.worldToScreen(node.x, node.y);
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = rect.width / this.logicalWidth;
     const scaleY = rect.height / this.logicalHeight;
@@ -716,11 +958,11 @@ class FlowchartCanvas {
     this.textInput.value = '';
     this.textInput.style.cssText = `
       position: absolute;
-      left: ${rect.left + (node.x - node.width / 2 + 10) * scaleX}px;
-      top: ${rect.top + (node.y - 10) * scaleY}px;
-      width: ${(node.width - 20) * scaleX}px;
+      left: ${rect.left + (screenPos.x - node.width * this.zoom / 2 + 10 * this.zoom) * scaleX}px;
+      top: ${rect.top + (screenPos.y - 10 * this.zoom) * scaleY}px;
+      width: ${(node.width - 20) * this.zoom * scaleX}px;
       height: 20px;
-      font-size: 14px;
+      font-size: ${14 * this.zoom}px;
       font-family: Arial;
       text-align: center;
       padding: 4px;
@@ -728,13 +970,7 @@ class FlowchartCanvas {
       border: none !important;
       outline: none !important;
       background: transparent;
-      background-color: transparent;
       color: #000;
-      border-radius: 0;
-      box-shadow: none !important;
-      -webkit-appearance: none;
-      -moz-appearance: none;
-      appearance: none;
       z-index: 1000;
     `;
     
@@ -794,6 +1030,20 @@ class FlowchartCanvas {
     const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
     const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
     
+    // Reset view
+    if (ctrlKey && e.key === '0') {
+      this.resetView();
+      e.preventDefault();
+      return;
+    }
+    
+    // Fit to content
+    if (ctrlKey && e.key === '1') {
+      this.fitToContent();
+      e.preventDefault();
+      return;
+    }
+    
     if (ctrlKey && e.key === 'z' && !e.shiftKey) {
       this.undo();
       e.preventDefault();
@@ -833,6 +1083,10 @@ class FlowchartCanvas {
         e.preventDefault();
       }
     }
+  }
+
+  handleKeyUp(e) {
+    // Handle key releases if needed
   }
 
   // ============================================================================
@@ -941,8 +1195,8 @@ class FlowchartCanvas {
       const newNode = this.addNode(
         data.type,
         data.text,
-        this.selectedNode ? this.selectedNode.x + 30 : 150,
-        this.selectedNode ? this.selectedNode.y + 30 : 150
+        this.selectedNode ? this.selectedNode.x + 30 : undefined,
+        this.selectedNode ? this.selectedNode.y + 30 : undefined
       );
       newNode.width = data.width;
       newNode.height = data.height;
@@ -1013,36 +1267,38 @@ class FlowchartCanvas {
     return this.canvas.toDataURL('image/png');
   }
 
-  exportToPDF() {
-    if (typeof jspdf === 'undefined') {
-      throw new Error('jsPDF library is required for PDF export');
-    }
-    
-    const imgData = this.canvas.toDataURL('image/png');
-    const pdf = new jspdf.jsPDF({
-      orientation: this.canvas.width > this.canvas.height ? 'landscape' : 'portrait',
-      unit: 'px',
-      format: [this.logicalWidth, this.logicalHeight]
-    });
-    pdf.addImage(imgData, 'PNG', 0, 0, this.logicalWidth, this.logicalHeight);
-    return pdf;
-  }
-
   // ============================================================================
   // Cleanup
   // ============================================================================
 
   destroy() {
+    // Clean up event listeners
+    if (this.canvas) {
+      this.canvas.removeEventListener('mousedown', this.handleMouseDown);
+      this.canvas.removeEventListener('mousemove', this.handleMouseMove);
+      this.canvas.removeEventListener('mouseup', this.handleMouseUp);
+      this.canvas.removeEventListener('dblclick', this.handleDoubleClick);
+      this.canvas.removeEventListener('wheel', this.handleWheel);
+      this.canvas.removeEventListener('contextmenu', (e) => e.preventDefault());
+    }
+    
+    document.removeEventListener('keydown', this.handleKeyDown);
+    document.removeEventListener('keyup', this.handleKeyUp);
+    
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
+    
+    if (this.textInput && document.body.contains(this.textInput)) {
+      document.body.removeChild(this.textInput);
+    }
+    
     if (this.canvas) {
       this.canvas.remove();
     }
   }
 }
 
-// Export
 export { FlowchartCanvas as Canvas, Node, Connection };
 export default { Canvas: FlowchartCanvas, Node, Connection };
 
