@@ -1,19 +1,16 @@
 // src/Connection.js
-// Represents a connection between two flowchart nodes with zoom support
+// Represents a connection between two flowchart nodes with orthogonal routing
 
 class Connection {
   constructor(id, fromNode, fromPort, toNode, toPort) {
     this.id = id;
     this.fromNode = fromNode;
-    this.fromPort = fromPort; // 'top', 'right', 'bottom', 'left'
+    this.fromPort = fromPort;
     this.toNode = toNode;
-    this.toPort = toPort; // 'top', 'right', 'bottom', 'left'
+    this.toPort = toPort;
     this.selected = false;
+    this.waypoints = [];
   }
-  
-  // ============================================================================
-  // Port Position
-  // ============================================================================
   
   getPortPosition(node, port) {
     switch(port) {
@@ -30,34 +27,19 @@ class Connection {
     }
   }
 
-  // ============================================================================
-  // Point Detection
-  // ============================================================================
-
   isNearPoint(x, y, zoom = 1, threshold = 15) {
     const adjustedThreshold = threshold / zoom;
-    const start = this.getPortPosition(this.fromNode, this.fromPort);
-    const end = this.getPortPosition(this.toNode, this.toPort);
+    const points = this.getPathPoints();
     
-    // Check if near start or end point
-    if (this.distanceToPoint(x, y, start.x, start.y) < adjustedThreshold) {
-      return true;
+    for (let i = 0; i < points.length - 1; i++) {
+      const start = points[i];
+      const end = points[i + 1];
+      const dist = this.pointToLineDistance(x, y, start.x, start.y, end.x, end.y);
+      if (dist < adjustedThreshold) {
+        return true;
+      }
     }
-    if (this.distanceToPoint(x, y, end.x, end.y) < adjustedThreshold) {
-      return true;
-    }
-    
-    // Check if near the line
-    const dist = this.pointToLineDistance(x, y, start.x, start.y, end.x, end.y);
-    
-    // Check middle area (for curved lines)
-    const midX = (start.x + end.x) / 2;
-    const midY = (start.y + end.y) / 2;
-    if (this.distanceToPoint(x, y, midX, midY) < adjustedThreshold * 2) {
-      return true;
-    }
-    
-    return dist < adjustedThreshold;
+    return false;
   }
 
   distanceToPoint(x1, y1, x2, y2) {
@@ -82,69 +64,135 @@ class Connection {
     return Math.sqrt((px - nearestX) * (px - nearestX) + (py - nearestY) * (py - nearestY));
   }
 
-  // ============================================================================
-  // Drawing Methods
-  // ============================================================================
-  
-  draw(ctx, isSelected = false) {
-    ctx.save();
-    
+  getPathPoints() {
     const start = this.getPortPosition(this.fromNode, this.fromPort);
     const end = this.getPortPosition(this.toNode, this.toPort);
     
-    // Set style - ALWAYS BLACK, solid line
-    ctx.strokeStyle = '#000';  // Always black
-    ctx.lineWidth = isSelected ? 3 : 2;  // Thicker when selected
-    ctx.setLineDash([]);  // Solid line (no dashes)
+    if (this.waypoints.length > 0) {
+      return [start, ...this.waypoints, end];
+    }
     
-    // Draw the connection line
-    this.drawConnectionLine(ctx, start, end);
-    
-    ctx.restore();
+    return this.calculateOrthogonalPath(start, end, this.fromPort, this.toPort);
   }
 
-  drawConnectionLine(ctx, start, end) {
-    const needsBend = this.needsBendingPath(start, end);
+  calculateOrthogonalPath(start, end, startPort, endPort) {
+    const points = [start];
+    const offset = 30;
+    
+    // Check for simple aligned cases - straight line
+    const isHorizontallyAligned = Math.abs(start.y - end.y) < 10;
+    const isVerticallyAligned = Math.abs(start.x - end.x) < 10;
+    
+    if (isHorizontallyAligned && (startPort === 'left' || startPort === 'right') &&
+        (endPort === 'left' || endPort === 'right')) {
+      points.push(end);
+      return points;
+    }
+    
+    if (isVerticallyAligned && (startPort === 'top' || startPort === 'bottom') &&
+        (endPort === 'top' || endPort === 'bottom')) {
+      points.push(end);
+      return points;
+    }
+    
+    // Get directions
+    const startDir = this.getPortDirection(startPort);
+    const endDir = this.getPortDirection(endPort);
+    
+    // PERPENDICULAR CONNECTIONS (horizontal to vertical OR vertical to horizontal)
+    // These ALWAYS use simple L-shape: start -> corner -> end (3 points total)
+    if ((startPort === 'right' || startPort === 'left') && 
+        (endPort === 'top' || endPort === 'bottom')) {
+      // Horizontal start to vertical end
+      points.push({ x: end.x, y: start.y });
+      points.push(end);
+      return points;
+    }
+    
+    if ((startPort === 'top' || startPort === 'bottom') && 
+        (endPort === 'right' || endPort === 'left')) {
+      // Vertical start to horizontal end  
+      points.push({ x: start.x, y: end.y });
+      points.push(end);
+      return points;
+    }
+    
+    // PARALLEL CONNECTIONS (both horizontal OR both vertical)
+    // These need offset points and middle segments
+    const p1 = {
+      x: start.x + startDir.x * offset,
+      y: start.y + startDir.y * offset
+    };
+    
+    const p2 = {
+      x: end.x + endDir.x * offset,
+      y: end.y + endDir.y * offset
+    };
+    
+    points.push(p1);
+    
+    if ((startPort === 'right' || startPort === 'left') && 
+        (endPort === 'right' || endPort === 'left')) {
+      // Both horizontal
+      const midX = (p1.x + p2.x) / 2;
+      points.push({ x: midX, y: p1.y });
+      points.push({ x: midX, y: p2.y });
+    } else if ((startPort === 'top' || startPort === 'bottom') && 
+               (endPort === 'top' || endPort === 'bottom')) {
+      // Both vertical
+      const midY = (p1.y + p2.y) / 2;
+      points.push({ x: p1.x, y: midY });
+      points.push({ x: p2.x, y: midY });
+    }
+    
+    points.push(p2);
+    points.push(end);
+    
+    return points;
+  }
+
+  getPortDirection(port) {
+    switch(port) {
+      case 'top': return { x: 0, y: -1 };
+      case 'right': return { x: 1, y: 0 };
+      case 'bottom': return { x: 0, y: 1 };
+      case 'left': return { x: -1, y: 0 };
+      default: return { x: 0, y: 0 };
+    }
+  }
+
+  draw(ctx, isSelected = false) {
+    ctx.save();
+    
+    const points = this.getPathPoints();
+    
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.setLineDash([]);
     
     ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
+    ctx.moveTo(points[0].x, points[0].y);
     
-    if (needsBend) {
-      // Create smooth path with control points
-      const offset = 50;
-      const cp1 = this.getControlPoint(start, this.fromPort, offset);
-      const cp2 = this.getControlPoint(end, this.toPort, offset);
-      
-      // Draw curved line
-      ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y);
-    } else {
-      // Simple straight line
-      ctx.lineTo(end.x, end.y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
     }
     
     ctx.stroke();
-  }
-
-  getControlPoint(point, port, offset) {
-    switch(port) {
-      case 'right':
-        return { x: point.x + offset, y: point.y };
-      case 'left':
-        return { x: point.x - offset, y: point.y };
-      case 'top':
-        return { x: point.x, y: point.y - offset };
-      case 'bottom':
-        return { x: point.x, y: point.y + offset };
-      default:
-        return point;
+    
+    if (isSelected && this.waypoints.length > 0) {
+      ctx.fillStyle = '#2196F3';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      
+      this.waypoints.forEach(point => {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
     }
-  }
-
-  needsBendingPath(start, end) {
-    // Simple heuristic: if distance is large or not aligned, use curves
-    const dx = Math.abs(end.x - start.x);
-    const dy = Math.abs(end.y - start.y);
-    return dx > 50 || dy > 50;
+    
+    ctx.restore();
   }
 }
 

@@ -13,28 +13,29 @@ if (!fs.existsSync(distDir)) {
 // Read source files IN ORDER
 const nodeCode = fs.readFileSync(path.join(srcDir, 'Node.js'), 'utf8');
 const connectionCode = fs.readFileSync(path.join(srcDir, 'Connection.js'), 'utf8');
+const areaCode = fs.readFileSync(path.join(srcDir, 'Area.js'), 'utf8');
+const nodeSettingsDialogCode = fs.readFileSync(path.join(srcDir, 'NodeSettingsDialog.js'), 'utf8');
+const areaSettingsDialogCode = fs.readFileSync(path.join(srcDir, 'AreaSettingsDialog.js'), 'utf8');
 const indexCode = fs.readFileSync(path.join(srcDir, 'index.js'), 'utf8');
 
 // Clean all export statements from the code
 function cleanExports(code) {
   return code
-    // Remove window.FlowchartLib assignment
     .replace(/window\.FlowchartLib\s*=\s*{[\s\S]*?};/g, '')
-    // Remove ES6 export statements
     .replace(/export\s+{\s*[\s\S]*?\s*};?/g, '')
     .replace(/export\s+default\s+[\s\S]*?;/g, '')
     .replace(/export\s+\{[\s\S]*?\}\s*;?/g, '')
-    // Remove export keyword from class/function declarations
     .replace(/export\s+(default\s+)?(class|function|const|let|var)/g, '$2')
-    // Remove any remaining export statements
     .replace(/^export\s+.*$/gm, '')
-    // Clean up any import statements (shouldn't be there, but just in case)
     .replace(/^import\s+.*$/gm, '')
     .trim();
 }
 
 const cleanedNodeCode = cleanExports(nodeCode);
 const cleanedConnectionCode = cleanExports(connectionCode);
+const cleanedAreaCode = cleanExports(areaCode);
+const cleanedNodeSettingsDialogCode = cleanExports(nodeSettingsDialogCode);
+const cleanedAreaSettingsDialogCode = cleanExports(areaSettingsDialogCode);
 const cleanedIndexCode = cleanExports(indexCode);
 
 // ============================================================================
@@ -47,23 +48,34 @@ const umdOutput = `/*!
  */
 (function(root, factory) {
   if (typeof define === 'function' && define.amd) {
-    // AMD
-    define([], factory);
+    define(['jszip'], factory);
   } else if (typeof module === 'object' && module.exports) {
-    // CommonJS
-    module.exports = factory();
+    module.exports = factory(require('jszip'));
   } else {
-    // Browser globals
-    root.FlowchartLib = factory();
+    root.FlowchartLib = factory(root.JSZip);
   }
-}(typeof self !== 'undefined' ? self : this, function() {
+}(typeof self !== 'undefined' ? self : this, function(JSZip) {
   'use strict';
+  
+  // Make JSZip available globally within the library
+  if (typeof window !== 'undefined' && !window.JSZip && JSZip) {
+    window.JSZip = JSZip;
+  }
   
   // Node class
   ${cleanedNodeCode}
   
   // Connection class
   ${cleanedConnectionCode}
+  
+  // Area class
+  ${cleanedAreaCode}
+  
+  // NodeSettingsDialog class
+  ${cleanedNodeSettingsDialogCode}
+  
+  // AreaSettingsDialog class
+  ${cleanedAreaSettingsDialogCode}
   
   // Main Canvas class
   ${cleanedIndexCode}
@@ -72,7 +84,10 @@ const umdOutput = `/*!
   return {
     Canvas: FlowchartCanvas,
     Node: Node,
-    Connection: Connection
+    Connection: Connection,
+    Area: Area,
+    NodeSettingsDialog: NodeSettingsDialog,
+    AreaSettingsDialog: AreaSettingsDialog
   };
 }));
 `;
@@ -85,11 +100,22 @@ const cjsOutput = `/*!
  */
 'use strict';
 
+const JSZip = require('jszip');
+
 // Node class
 ${cleanedNodeCode}
 
 // Connection class
 ${cleanedConnectionCode}
+
+// Area class
+${cleanedAreaCode}
+
+// NodeSettingsDialog class
+${cleanedNodeSettingsDialogCode}
+
+// AreaSettingsDialog class
+${cleanedAreaSettingsDialogCode}
 
 // Main Canvas class
 ${cleanedIndexCode}
@@ -98,10 +124,12 @@ ${cleanedIndexCode}
 module.exports = {
   Canvas: FlowchartCanvas,
   Node: Node,
-  Connection: Connection
+  Connection: Connection,
+  Area: Area,
+  NodeSettingsDialog: NodeSettingsDialog,
+  AreaSettingsDialog: AreaSettingsDialog
 };
 
-// Default export
 module.exports.default = module.exports;
 `;
 
@@ -112,23 +140,37 @@ const esmOutput = `/*!
  * FlowchartLib v1.0.0 - ES Module
  */
 
+import JSZip from 'jszip';
+
 // Node class
 ${cleanedNodeCode}
 
 // Connection class
 ${cleanedConnectionCode}
 
+// Area class
+${cleanedAreaCode}
+
+// NodeSettingsDialog class
+${cleanedNodeSettingsDialogCode}
+
+// AreaSettingsDialog class
+${cleanedAreaSettingsDialogCode}
+
 // Main Canvas class
 ${cleanedIndexCode}
 
 // Named exports
-export { FlowchartCanvas as Canvas, Node, Connection };
+export { FlowchartCanvas as Canvas, Node, Connection, Area, NodeSettingsDialog, AreaSettingsDialog };
 
 // Default export
 export default {
   Canvas: FlowchartCanvas,
   Node,
-  Connection
+  Connection,
+  Area,
+  NodeSettingsDialog,
+  AreaSettingsDialog
 };
 `;
 
@@ -167,7 +209,6 @@ async function minifyBuild() {
       fs.writeFileSync(path.join(distDir, 'flowchart-lib.umd.min.js'), minified.code);
       console.log('✅ Built: dist/flowchart-lib.umd.min.js (minified)');
       
-      // Show file sizes
       const originalSize = (Buffer.byteLength(umdOutput, 'utf8') / 1024).toFixed(2);
       const minifiedSize = (Buffer.byteLength(minified.code, 'utf8') / 1024).toFixed(2);
       const savings = (((originalSize - minifiedSize) / originalSize) * 100).toFixed(1);
@@ -180,7 +221,6 @@ async function minifyBuild() {
   }
 }
 
-// Run minification and complete
 minifyBuild().then(() => {
   console.log('\n🎉 Build complete!\n');
 }).catch(() => {

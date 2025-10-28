@@ -7,7 +7,6 @@
   "browser": "dist/flowchart-lib.umd.js",
   "unpkg": "dist/flowchart-lib.umd.min.js",
   "jsdelivr": "dist/flowchart-lib.umd.min.js",
-  "types": "dist/index.d.ts",
   "files": [
     "dist",
     "README.md",
@@ -39,7 +38,13 @@
     "url": "https://github.com/Morrowga/flowchart-js-library.git/issues"
   },
   "homepage": "https://github.com/Morrowga/flowchart-js-library.git",
+  "dependencies": {
+    "jszip": "^3.10.1"
+  },
   "devDependencies": {
     "terser": "^5.44.0"
+  },
+  "peerDependencies": {
+    "jszip": "^3.10.1"
   }
 }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Flowchart Library Test</title>
+  <title>Flowchart Library Demo</title>
   <style>
     * {
       margin: 0;
@@ -83,6 +83,22 @@
       background: #d32f2f;
     }
 
+    .icon-btn.success {
+      background: #4CAF50;
+    }
+
+    .icon-btn.success:hover {
+      background: #45a049;
+    }
+
+    .icon-btn.active {
+      background: #FF9800;
+    }
+
+    .icon-btn.active:hover {
+      background: #F57C00;
+    }
+
     .icon-btn svg {
       width: 20px;
       height: 20px;
@@ -120,7 +136,7 @@
   </style>
 </head>
 <body>
-  <h1>🎨 Flowchart Library Test</h1>
+  <!-- <h1>🎨 Flowchart Library Test - Area Marking</h1> -->
   
   <div class="toolbar">
     <div class="toolbar-group">
@@ -151,6 +167,16 @@
     </div>
 
     <div class="toolbar-group">
+      <button id="markAreaBtn" class="icon-btn success" onclick="toggleAreaMarking()" title="Mark Area">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+        </svg>
+        <span>Mark Area</span>
+      </button>
+    </div>
+
+    <div class="toolbar-group">
       <button class="icon-btn" onclick="exportJSON()" title="Export as JSON">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -175,6 +201,14 @@
           <path d="M10 12h4M10 16h4"/>
         </svg>
         <span>PDF</span>
+      </button>
+      <button class="icon-btn" onclick="exportZIP()" title="Export as ZIP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span>ZIP</span>
       </button>
       <button class="icon-btn" onclick="document.getElementById('fileInput').click()" title="Import JSON">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -205,54 +239,80 @@
     <div id="canvas-container"></div>
   </div>
 
-  <div class="instructions">
-    <strong>💡 Tips:</strong> Add nodes with buttons above • Drag nodes to move • 
-    Double-click to edit text • Drag from green dots to create connections • 
-    Select and press Delete to remove • Drag corners to resize • Ctrl+Z to undo
-  </div>
+  <!-- <div class="instructions">
+    <strong>💡 Tips:</strong> Add nodes with buttons above • Click <strong>Mark Area</strong> to draw section boxes • 
+    Double-click nodes/areas to edit settings • Drag nodes to move • Drag from connection points to create connections • 
+    Select and press Delete to remove • Drag corners to resize • <strong>Pan: Space+Drag, Right-click+Drag, or Ctrl+Drag</strong> • 
+    Zoom: Mouse wheel • Ctrl+Z to undo • Ctrl+Shift+Z to redo • Press ESC to cancel area marking
+  </div> -->
 
-  <!-- Include jsPDF library for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   
   <script src="../dist/flowchart-lib.umd.js"></script>
   
   <script>
-    // Initialize the flowchart with auto-sizing
     const flowchart = new FlowchartLib.Canvas('canvas-container', {
       mode: 'edit',
-      pixelRatio: 2  // Higher pixel ratio for crisper rendering
+      pixelRatio: 2
     });
+    
+    // Callback when area marking completes to update button state
+    flowchart.onAreaMarkingComplete = function() {
+      const btn = document.getElementById('markAreaBtn');
+      btn.classList.remove('active');
+      btn.classList.add('success');
+    };
     
     let nodeX = 100;
     
     function addStartNode() {
-      flowchart.addNode('start', 'Start', nodeX, 150);
+      const node = flowchart.addNode('start', 'Start', nodeX, 150);
       nodeX += 150;
       if (nodeX > 700) nodeX = 100;
     }
     
     function addProcessNode() {
-      flowchart.addNode('process', 'Process', nodeX, 150);
+      const node = flowchart.addNode('process', 'Process', nodeX, 150);
       nodeX += 150;
       if (nodeX > 700) nodeX = 100;
     }
     
     function addDecisionNode() {
-      flowchart.addNode('decision', 'Decision?', nodeX, 150);
+      const node = flowchart.addNode('decision', 'Decision?', nodeX, 150);
       nodeX += 150;
       if (nodeX > 700) nodeX = 100;
     }
     
     function addEndNode() {
-      flowchart.addNode('end', 'End', nodeX, 150);
+      const node = flowchart.addNode('end', 'End', nodeX, 150);
       nodeX += 150;
       if (nodeX > 700) nodeX = 100;
+    }
+
+    function toggleAreaMarking() {
+      const btn = document.getElementById('markAreaBtn');
+      if (flowchart.markingArea) {
+        flowchart.markingArea = false;
+        flowchart.areaStart = null;
+        flowchart.areaEnd = null;
+        btn.classList.remove('active');
+        btn.classList.add('success');
+        flowchart.render();
+      } else {
+        flowchart.startAreaMarking();
+        btn.classList.remove('success');
+        btn.classList.add('active');
+      }
     }
     
     function clearCanvas() {
       if (confirm('Are you sure you want to clear the canvas?')) {
         flowchart.clear();
         nodeX = 100;
+        const btn = document.getElementById('markAreaBtn');
+        btn.classList.remove('active');
+        btn.classList.add('success');
       }
     }
 
@@ -280,6 +340,10 @@
       pdf.save('flowchart.pdf');
     }
 
+    function exportZIP() {
+      flowchart.downloadZip();
+    }
+
     function importJSON(event) {
       const file = event.target.files[0];
       if (file) {
@@ -296,6 +360,15 @@
       }
       event.target.value = '';
     }
+
+    // Reset button state when area marking is cancelled
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && flowchart.markingArea) {
+        const btn = document.getElementById('markAreaBtn');
+        btn.classList.remove('active');
+        btn.classList.add('success');
+      }
+    });
   </script>
 </body>
 </html>

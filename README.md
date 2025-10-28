@@ -44,25 +44,25 @@ A lightweight, zero-dependency flowchart library for creating interactive flowch
 ### Via npm (Recommended)
 
 ```bash
-npm install @yourusername/flowchart-lib
+npm install @thihaeung/flowchart-lib
 ```
 
 ### Via CDN
 
 ```html
 <!-- Latest version -->
-<script src="https://unpkg.com/@yourusername/flowchart-lib"></script>
+<script src="https://unpkg.com/@thihaeung/flowchart-lib"></script>
 
 <!-- Or use jsDelivr -->
-<script src="https://cdn.jsdelivr.net/npm/@yourusername/flowchart-lib"></script>
+<script src="https://cdn.jsdelivr.net/npm/@thihaeung/flowchart-lib"></script>
 
 <!-- Specific version (recommended for production) -->
-<script src="https://unpkg.com/@yourusername/flowchart-lib@1.0.0/dist/flowchart-lib.umd.min.js"></script>
+<script src="https://unpkg.com/@thihaeung/flowchart-lib@1.0.0/dist/flowchart-lib.umd.min.js"></script>
 ```
 
 ### Manual Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/yourusername/flowchart-lib/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/thihaeung/flowchart-lib/releases)
 2. Include the appropriate build file:
 
 ```html
@@ -116,7 +116,7 @@ npm install @yourusername/flowchart-lib
   <div id="canvas-container"></div>
   
   <!-- Include library from CDN or local file -->
-  <script src="https://unpkg.com/@yourusername/flowchart-lib"></script>
+  <script src="https://unpkg.com/@thihaeung/flowchart-lib"></script>
   <script>
     // Initialize
     const flowchart = new FlowchartLib.Canvas('canvas-container', {
@@ -140,7 +140,7 @@ npm install @yourusername/flowchart-lib
 ### ES Module (Modern JavaScript)
 
 ```javascript
-import { Canvas, Node, Connection } from '@yourusername/flowchart-lib';
+import { Canvas, Node, Connection } from '@thihaeung/flowchart-lib';
 
 const flowchart = new Canvas('canvas-container', {
   mode: 'edit',
@@ -156,7 +156,7 @@ flowchart.addConnection(start, 'right', process, 'left');
 ### CommonJS (Node.js / Electron)
 
 ```javascript
-const { Canvas, Node, Connection } = require('@yourusername/flowchart-lib');
+const { Canvas, Node, Connection } = require('@thihaeung/flowchart-lib');
 
 const flowchart = new Canvas('canvas-container');
 flowchart.addNode('start', 'Start', 100, 100);
@@ -425,7 +425,7 @@ flowchart.destroy();
 
 **Installation:**
 ```bash
-npm install @yourusername/flowchart-lib
+npm install @thihaeung/flowchart-lib
 ```
 
 **Main Process (main.js):**
@@ -487,7 +487,7 @@ app.whenReady().then(createWindow);
   <div id="canvas-container" class="canvas-container"></div>
 
   <script>
-    const { Canvas } = require('@yourusername/flowchart-lib');
+    const { Canvas } = require('@thihaeung/flowchart-lib');
     
     const flowchart = new Canvas('canvas-container', {
       mode: 'edit',
@@ -544,7 +544,7 @@ app.whenReady().then(createWindow);
     "start": "electron ."
   },
   "dependencies": {
-    "@yourusername/flowchart-lib": "^1.0.0"
+    "@thihaeung/flowchart-lib": "^1.0.0"
   },
   "devDependencies": {
     "electron": "^25.0.0"
@@ -558,7 +558,7 @@ app.whenReady().then(createWindow);
 
 **Installation:**
 ```bash
-npm install @yourusername/flowchart-lib
+npm install @thihaeung/flowchart-lib
 ```
 
 **Single File Component:**
@@ -581,7 +581,7 @@ npm install @yourusername/flowchart-lib
 </template>
 
 <script>
-import { Canvas } from '@yourusername/flowchart-lib';
+import { Canvas } from '@thihaeung/flowchart-lib';
 
 export default {
   name: 'FlowchartEditor',
@@ -705,7 +705,7 @@ export default {
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { Canvas } from '@yourusername/flowchart-lib';
+import { Canvas } from '@thihaeung/flowchart-lib';
 
 const canvasContainer = ref(null);
 let flowchart = null;
@@ -741,13 +741,13 @@ defineExpose({
 
 **Installation:**
 ```bash
-npm install @yourusername/flowchart-lib
+npm install @thihaeung/flowchart-lib
 ```
 
 **Function Component with Hooks:**
 ```jsx
 import React, { useEffect, useRef, useState } from 'react';
-import { Canvas } from '@yourusername/flowchart-lib';
+import { Canvas } from '@thihaeung/flowchart-lib';
 import './FlowchartEditor.css';
 
 function FlowchartEditor() {
@@ -1120,7 +1120,7 @@ if (!validation.valid) {
 The library includes TypeScript definitions. Create or use the included `flowchart-lib.d.ts`:
 
 ```typescript
-declare module '@yourusername/flowchart-lib' {
+declare module '@thihaeung/flowchart-lib' {
   export interface CanvasOptions {
     mode?: 'edit' | 'view';
     width?: number | null;
@@ -1181,7 +1181,7 @@ declare module '@yourusername/flowchart-lib' {
 ### TypeScript Usage Example
 
 ```typescript
-import { Canvas, Node, Connection, CanvasOptions } from '@yourusername/flowchart-lib';
+import { Canvas, Node, Connection, CanvasOptions } from '@thihaeung/flowchart-lib';
 
 const options: CanvasOptions = {
   mode: 'edit',
@@ -1334,9 +1334,9 @@ Contributions are welcome! Please:
 
 For issues, questions, or feature requests:
 
-- **GitHub Issues**: [https://github.com/yourusername/flowchart-lib/issues](https://github.com/yourusername/flowchart-lib/issues)
+- **GitHub Issues**: [https://github.com/Morrowga/flowchart-lib/issues](https://github.com/Morrowga/flowchart-lib/issues)
 - **Email**: your.email@example.com
-- **Documentation**: [https://github.com/yourusername/flowchart-lib#readme](https://github.com/yourusername/flowchart-lib#readme)
+- **Documentation**: [https://github.com/Morrowga/flowchart-lib#readme](https://github.com/Morrowga/flowchart-lib#readme)
 
 ---
 

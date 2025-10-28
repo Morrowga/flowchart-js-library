@@ -3,9 +3,11 @@
  */
 'use strict';
 
+const JSZip = require('jszip');
+
 // Node class
 // src/Node.js
-// Represents a single flowchart node with zoom support
+// Represents a single flowchart node with zoom support and customizable properties
 
 class Node {
   constructor(id, type, x, y, text = '') {
@@ -17,6 +19,14 @@ class Node {
     this.width = 120;
     this.height = 60;
     this.selected = false;
+    
+    // Customizable properties with default values
+    this.link = '';  // URL link (blank)
+    this.fillColor = '#FFFFFF';  // White
+    this.fontColor = '#000000';  // Black
+    this.fontSize = 14;  // Normal
+    this.outlineColor = '#000000';  // Black
+    this.outlineWidth = 2;
   }
   
   // ============================================================================
@@ -104,16 +114,42 @@ class Node {
   }
 
   // ============================================================================
+  // Settings Methods
+  // ============================================================================
+  
+  updateSettings(settings) {
+    if (settings.text !== undefined) this.text = settings.text;
+    if (settings.link !== undefined) this.link = settings.link;
+    if (settings.fillColor !== undefined) this.fillColor = settings.fillColor;
+    if (settings.fontColor !== undefined) this.fontColor = settings.fontColor;
+    if (settings.fontSize !== undefined) this.fontSize = settings.fontSize;
+    if (settings.outlineColor !== undefined) this.outlineColor = settings.outlineColor;
+    if (settings.outlineWidth !== undefined) this.outlineWidth = settings.outlineWidth;
+  }
+
+  getSettings() {
+    return {
+      text: this.text,
+      link: this.link,
+      fillColor: this.fillColor,
+      fontColor: this.fontColor,
+      fontSize: this.fontSize,
+      outlineColor: this.outlineColor,
+      outlineWidth: this.outlineWidth
+    };
+  }
+
+  // ============================================================================
   // Drawing Methods
   // ============================================================================
   
   draw(ctx, isSelected = false) {
     ctx.save();
     
-    // Set styles
-    ctx.fillStyle = this.getFillColor();
-    ctx.strokeStyle = isSelected ? '#2196F3' : '#333';
-    ctx.lineWidth = isSelected ? 3 : 2;
+    // Set styles using custom properties
+    ctx.fillStyle = this.fillColor;
+    ctx.strokeStyle = isSelected ? '#2196F3' : this.outlineColor;
+    ctx.lineWidth = isSelected ? 3 : this.outlineWidth;
     
     // Draw shape based on type
     switch(this.type) {
@@ -131,7 +167,7 @@ class Node {
         this.drawRectangle(ctx);
     }
     
-    // Draw text
+    // Draw text with custom properties
     this.drawText(ctx);
 
     // Draw connection points
@@ -188,11 +224,20 @@ class Node {
   }
   
   drawText(ctx) {
-    ctx.fillStyle = '#000';
-    ctx.font = '14px Arial';
+    ctx.fillStyle = this.fontColor;
+    ctx.font = `${this.fontSize}px Arial`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(this.text, this.x, this.y);
+    
+    // Handle multi-line text
+    const lines = this.text.split('\n');
+    const lineHeight = this.fontSize * 1.2;
+    const totalHeight = lines.length * lineHeight;
+    const startY = this.y - totalHeight / 2 + lineHeight / 2;
+    
+    lines.forEach((line, index) => {
+      ctx.fillText(line, this.x, startY + index * lineHeight);
+    });
   }
 
   drawConnectionPoints(ctx) {
@@ -303,33 +348,24 @@ class Node {
   // ============================================================================
   
   getFillColor() {
-    switch(this.type) {
-      case 'start': return '#90EE90';  // Light green
-      case 'end': return '#FFB6C1';     // Light pink
-      case 'process': return '#87CEEB'; // Light blue
-      case 'decision': return '#FFD700'; // Gold
-      default: return '#FFF';
-    }
+    return this.fillColor;
   }
 }
 
 // Connection class
 // src/Connection.js
-// Represents a connection between two flowchart nodes with zoom support
+// Represents a connection between two flowchart nodes with orthogonal routing
 
 class Connection {
   constructor(id, fromNode, fromPort, toNode, toPort) {
     this.id = id;
     this.fromNode = fromNode;
-    this.fromPort = fromPort; // 'top', 'right', 'bottom', 'left'
+    this.fromPort = fromPort;
     this.toNode = toNode;
-    this.toPort = toPort; // 'top', 'right', 'bottom', 'left'
+    this.toPort = toPort;
     this.selected = false;
+    this.waypoints = [];
   }
-  
-  // ============================================================================
-  // Port Position
-  // ============================================================================
   
   getPortPosition(node, port) {
     switch(port) {
@@ -346,34 +382,19 @@ class Connection {
     }
   }
 
-  // ============================================================================
-  // Point Detection
-  // ============================================================================
-
   isNearPoint(x, y, zoom = 1, threshold = 15) {
     const adjustedThreshold = threshold / zoom;
-    const start = this.getPortPosition(this.fromNode, this.fromPort);
-    const end = this.getPortPosition(this.toNode, this.toPort);
+    const points = this.getPathPoints();
     
-    // Check if near start or end point
-    if (this.distanceToPoint(x, y, start.x, start.y) < adjustedThreshold) {
-      return true;
+    for (let i = 0; i < points.length - 1; i++) {
+      const start = points[i];
+      const end = points[i + 1];
+      const dist = this.pointToLineDistance(x, y, start.x, start.y, end.x, end.y);
+      if (dist < adjustedThreshold) {
+        return true;
+      }
     }
-    if (this.distanceToPoint(x, y, end.x, end.y) < adjustedThreshold) {
-      return true;
-    }
-    
-    // Check if near the line
-    const dist = this.pointToLineDistance(x, y, start.x, start.y, end.x, end.y);
-    
-    // Check middle area (for curved lines)
-    const midX = (start.x + end.x) / 2;
-    const midY = (start.y + end.y) / 2;
-    if (this.distanceToPoint(x, y, midX, midY) < adjustedThreshold * 2) {
-      return true;
-    }
-    
-    return dist < adjustedThreshold;
+    return false;
   }
 
   distanceToPoint(x1, y1, x2, y2) {
@@ -398,69 +419,814 @@ class Connection {
     return Math.sqrt((px - nearestX) * (px - nearestX) + (py - nearestY) * (py - nearestY));
   }
 
-  // ============================================================================
-  // Drawing Methods
-  // ============================================================================
+  getPathPoints() {
+    const start = this.getPortPosition(this.fromNode, this.fromPort);
+    const end = this.getPortPosition(this.toNode, this.toPort);
+    
+    if (this.waypoints.length > 0) {
+      return [start, ...this.waypoints, end];
+    }
+    
+    return this.calculateOrthogonalPath(start, end, this.fromPort, this.toPort);
+  }
+
+  calculateOrthogonalPath(start, end, startPort, endPort) {
+    const points = [start];
+    const offset = 30;
+    
+    // Check for simple aligned cases - straight line
+    const isHorizontallyAligned = Math.abs(start.y - end.y) < 10;
+    const isVerticallyAligned = Math.abs(start.x - end.x) < 10;
+    
+    if (isHorizontallyAligned && (startPort === 'left' || startPort === 'right') &&
+        (endPort === 'left' || endPort === 'right')) {
+      points.push(end);
+      return points;
+    }
+    
+    if (isVerticallyAligned && (startPort === 'top' || startPort === 'bottom') &&
+        (endPort === 'top' || endPort === 'bottom')) {
+      points.push(end);
+      return points;
+    }
+    
+    // Get directions
+    const startDir = this.getPortDirection(startPort);
+    const endDir = this.getPortDirection(endPort);
+    
+    // PERPENDICULAR CONNECTIONS (horizontal to vertical OR vertical to horizontal)
+    // These ALWAYS use simple L-shape: start -> corner -> end (3 points total)
+    if ((startPort === 'right' || startPort === 'left') && 
+        (endPort === 'top' || endPort === 'bottom')) {
+      // Horizontal start to vertical end
+      points.push({ x: end.x, y: start.y });
+      points.push(end);
+      return points;
+    }
+    
+    if ((startPort === 'top' || startPort === 'bottom') && 
+        (endPort === 'right' || endPort === 'left')) {
+      // Vertical start to horizontal end  
+      points.push({ x: start.x, y: end.y });
+      points.push(end);
+      return points;
+    }
+    
+    // PARALLEL CONNECTIONS (both horizontal OR both vertical)
+    // These need offset points and middle segments
+    const p1 = {
+      x: start.x + startDir.x * offset,
+      y: start.y + startDir.y * offset
+    };
+    
+    const p2 = {
+      x: end.x + endDir.x * offset,
+      y: end.y + endDir.y * offset
+    };
+    
+    points.push(p1);
+    
+    if ((startPort === 'right' || startPort === 'left') && 
+        (endPort === 'right' || endPort === 'left')) {
+      // Both horizontal
+      const midX = (p1.x + p2.x) / 2;
+      points.push({ x: midX, y: p1.y });
+      points.push({ x: midX, y: p2.y });
+    } else if ((startPort === 'top' || startPort === 'bottom') && 
+               (endPort === 'top' || endPort === 'bottom')) {
+      // Both vertical
+      const midY = (p1.y + p2.y) / 2;
+      points.push({ x: p1.x, y: midY });
+      points.push({ x: p2.x, y: midY });
+    }
+    
+    points.push(p2);
+    points.push(end);
+    
+    return points;
+  }
+
+  getPortDirection(port) {
+    switch(port) {
+      case 'top': return { x: 0, y: -1 };
+      case 'right': return { x: 1, y: 0 };
+      case 'bottom': return { x: 0, y: 1 };
+      case 'left': return { x: -1, y: 0 };
+      default: return { x: 0, y: 0 };
+    }
+  }
+
+  draw(ctx, isSelected = false) {
+    ctx.save();
+    
+    const points = this.getPathPoints();
+    
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.setLineDash([]);
+    
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    
+    ctx.stroke();
+    
+    if (isSelected && this.waypoints.length > 0) {
+      ctx.fillStyle = '#2196F3';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      
+      this.waypoints.forEach(point => {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+    }
+    
+    ctx.restore();
+  }
+}
+
+// Area class
+// src/Area.js
+// Represents a rectangular area/section in the flowchart
+
+class Area {
+  constructor(id, x1, y1, x2, y2, title = 'Section') {
+    this.id = id;
+    this.x1 = Math.min(x1, x2);
+    this.y1 = Math.min(y1, y2);
+    this.x2 = Math.max(x1, x2);
+    this.y2 = Math.max(y1, y2);
+    this.title = title;
+    this.selected = false;
+    
+    // Visual properties
+    this.fillColor = 'rgba(33, 150, 243, 0.1)';
+    this.outlineColor = '#000';
+    this.outlineWidth = 1;
+    this.titleBgColor = '#000';
+    this.titleTextColor = '#FFFFFF';
+  }
+  
+  get width() {
+    return this.x2 - this.x1;
+  }
+  
+  get height() {
+    return this.y2 - this.y1;
+  }
+  
+  containsPoint(x, y) {
+    return x >= this.x1 && x <= this.x2 && y >= this.y1 && y <= this.y2;
+  }
+  
+  isOnTitleBar(x, y) {
+    const titleHeight = 30;
+    return x >= this.x1 && x <= this.x2 && 
+           y >= this.y1 - titleHeight && y <= this.y1;
+  }
+  
+  isOnResizeHandle(x, y, zoom = 1) {
+    const handles = this.getResizeHandles();
+    const threshold = 8 / zoom;
+    
+    for (let handle of handles) {
+      const distance = Math.sqrt((x - handle.x) ** 2 + (y - handle.y) ** 2);
+      if (distance < threshold) {
+        return handle;
+      }
+    }
+    return null;
+  }
+  
+  getResizeHandles() {
+    return [
+      { x: this.x1, y: this.y1, position: 'top-left' },
+      { x: this.x2, y: this.y1, position: 'top-right' },
+      { x: this.x2, y: this.y2, position: 'bottom-right' },
+      { x: this.x1, y: this.y2, position: 'bottom-left' },
+      { x: (this.x1 + this.x2) / 2, y: this.y1, position: 'top' },
+      { x: this.x2, y: (this.y1 + this.y2) / 2, position: 'right' },
+      { x: (this.x1 + this.x2) / 2, y: this.y2, position: 'bottom' },
+      { x: this.x1, y: (this.y1 + this.y2) / 2, position: 'left' }
+    ];
+  }
+  
+  updateSettings(settings) {
+    if (settings.title !== undefined) this.title = settings.title;
+    if (settings.fillColor !== undefined) this.fillColor = settings.fillColor;
+    if (settings.outlineColor !== undefined) this.outlineColor = settings.outlineColor;
+    if (settings.titleBgColor !== undefined) this.titleBgColor = settings.titleBgColor;
+  }
+  
+  getSettings() {
+    return {
+      title: this.title,
+      fillColor: this.fillColor,
+      outlineColor: this.outlineColor,
+      titleBgColor: this.titleBgColor
+    };
+  }
   
   draw(ctx, isSelected = false) {
     ctx.save();
     
-    const start = this.getPortPosition(this.fromNode, this.fromPort);
-    const end = this.getPortPosition(this.toNode, this.toPort);
+    // Draw filled rectangle
+    ctx.fillStyle = this.fillColor;
+    ctx.fillRect(this.x1, this.y1, this.width, this.height);
     
-    // Set style - ALWAYS BLACK, solid line
-    ctx.strokeStyle = '#000';  // Always black
-    ctx.lineWidth = isSelected ? 3 : 2;  // Thicker when selected
-    ctx.setLineDash([]);  // Solid line (no dashes)
+    // Draw outline
+    ctx.strokeStyle = isSelected ? '#FF9800' : this.outlineColor;
+    ctx.lineWidth = isSelected ? 3 : this.outlineWidth;
+    ctx.setLineDash(isSelected ? [5, 5] : []);
+    ctx.strokeRect(this.x1, this.y1, this.width, this.height);
+    ctx.setLineDash([]);
     
-    // Draw the connection line
-    this.drawConnectionLine(ctx, start, end);
+    // Draw title bar
+    const titleHeight = 30;
+    ctx.fillStyle = this.titleBgColor;
+    ctx.fillRect(this.x1, this.y1 - titleHeight, this.width, titleHeight);
+    
+    // Draw title text
+    ctx.fillStyle = this.titleTextColor;
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.title, this.x1 + 10, this.y1 - titleHeight / 2);
+    
+    // Draw resize handles if selected
+    if (isSelected) {
+      this.drawResizeHandles(ctx);
+    }
     
     ctx.restore();
   }
+  
+  drawResizeHandles(ctx) {
+    const handles = this.getResizeHandles();
+    
+    ctx.fillStyle = '#FF9800';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    
+    for (let handle of handles) {
+      ctx.fillRect(handle.x - 4, handle.y - 4, 8, 8);
+      ctx.strokeRect(handle.x - 4, handle.y - 4, 8, 8);
+    }
+  }
+}
 
-  drawConnectionLine(ctx, start, end) {
-    const needsBend = this.needsBendingPath(start, end);
+// NodeSettingsDialog class
+// src/NodeSettingsDialog.js
+// Dialog for editing node properties that appears beside the cursor
+
+class NodeSettingsDialog {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.dialog = null;
+    this.currentNode = null;
+    this.onSave = null;
+    this.createDialog();
+  }
+
+  createDialog() {
+    // Create dialog container
+    this.dialog = document.createElement('div');
+    this.dialog.className = 'flowchart-node-settings-dialog';
+    this.dialog.style.cssText = `
+      position: fixed;
+      background: white;
+      border: 2px solid #2196F3;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 10000;
+      display: none;
+      min-width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    `;
+
+    // Create dialog content
+    this.dialog.innerHTML = `
+      <div style="margin-bottom: 15px;">
+        <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px; border-bottom: 2px solid #2196F3; padding-bottom: 8px;">
+          Node Settings
+        </h3>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px;">
+          Text (use Shift+Enter for line breaks):
+        </label>
+        <textarea id="node-text" rows="3" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; font-family: Arial, sans-serif; resize: vertical;"></textarea>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px;">
+          Link (URL):
+        </label>
+        <input type="url" id="node-link" placeholder="https://example.com" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px;">
+            Fill Color:
+          </label>
+          <div style="display: flex; gap: 5px; align-items: center;">
+            <input type="color" id="node-fill-color" style="width: 50px; height: 32px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+            <input type="text" id="node-fill-color-text" placeholder="#FFFFFF" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace;">
+          </div>
+        </div>
+
+        <div>
+          <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px;">
+            Font Color:
+          </label>
+          <div style="display: flex; gap: 5px; align-items: center;">
+            <input type="color" id="node-font-color" style="width: 50px; height: 32px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+            <input type="text" id="node-font-color-text" placeholder="#000000" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace;">
+          </div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px;">
+            Font Size:
+          </label>
+          <input type="number" id="node-font-size" min="8" max="48" value="14" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+        </div>
+
+        <div>
+          <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px;">
+            Outline Width:
+          </label>
+          <input type="number" id="node-outline-width" min="1" max="10" value="2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+        </div>
+      </div>
+
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 13px;">
+          Outline Color:
+        </label>
+        <div style="display: flex; gap: 5px; align-items: center;">
+          <input type="color" id="node-outline-color" style="width: 50px; height: 32px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+          <input type="text" id="node-outline-color-text" placeholder="#000000" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-family: monospace;">
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
+        <button id="node-settings-cancel" style="padding: 8px 20px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; color: #666;">
+          Cancel
+        </button>
+        <button id="node-settings-save" style="padding: 8px 20px; border: none; background: #2196F3; color: white; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;">
+          Save
+        </button>
+      </div>
+    `;
+
+    document.body.appendChild(this.dialog);
+
+    // Setup event listeners
+    this.setupEventListeners();
+  }
+
+  setupEventListeners() {
+    // PREVENT KEYBOARD EVENTS FROM BUBBLING TO CANVAS
+    this.dialog.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+    });
     
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
+    this.dialog.addEventListener('keyup', (e) => {
+      e.stopPropagation();
+    });
+
+    // Color picker sync with text input
+    const fillColorPicker = this.dialog.querySelector('#node-fill-color');
+    const fillColorText = this.dialog.querySelector('#node-fill-color-text');
+    fillColorPicker.addEventListener('input', (e) => {
+      fillColorText.value = e.target.value.toUpperCase();
+    });
+    fillColorText.addEventListener('input', (e) => {
+      if (/^#[0-9A-F]{6}$/i.test(e.target.value)) {
+        fillColorPicker.value = e.target.value;
+      }
+    });
+
+    const fontColorPicker = this.dialog.querySelector('#node-font-color');
+    const fontColorText = this.dialog.querySelector('#node-font-color-text');
+    fontColorPicker.addEventListener('input', (e) => {
+      fontColorText.value = e.target.value.toUpperCase();
+    });
+    fontColorText.addEventListener('input', (e) => {
+      if (/^#[0-9A-F]{6}$/i.test(e.target.value)) {
+        fontColorPicker.value = e.target.value;
+      }
+    });
+
+    const outlineColorPicker = this.dialog.querySelector('#node-outline-color');
+    const outlineColorText = this.dialog.querySelector('#node-outline-color-text');
+    outlineColorPicker.addEventListener('input', (e) => {
+      outlineColorText.value = e.target.value.toUpperCase();
+    });
+    outlineColorText.addEventListener('input', (e) => {
+      if (/^#[0-9A-F]{6}$/i.test(e.target.value)) {
+        outlineColorPicker.value = e.target.value;
+      }
+    });
+
+    // Save button
+    this.dialog.querySelector('#node-settings-save').addEventListener('click', () => {
+      this.saveSettings();
+    });
+
+    // Cancel button
+    this.dialog.querySelector('#node-settings-cancel').addEventListener('click', () => {
+      this.hide();
+    });
+
+    // Close on Escape key - but still allow it through
+    this.dialog.querySelector('#node-text').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.saveSettings();
+      }
+    });
+  }
+
+
+  show(node, cursorX, cursorY) {
+    this.currentNode = node;
     
-    if (needsBend) {
-      // Create smooth path with control points
-      const offset = 50;
-      const cp1 = this.getControlPoint(start, this.fromPort, offset);
-      const cp2 = this.getControlPoint(end, this.toPort, offset);
-      
-      // Draw curved line
-      ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y);
+    // Store original settings to restore on cancel
+    this.originalSettings = {
+      text: node.text,
+      link: node.link,
+      fillColor: node.fillColor,
+      fontColor: node.fontColor,
+      fontSize: node.fontSize,
+      outlineColor: node.outlineColor,
+      outlineWidth: node.outlineWidth
+    };
+    
+    // Populate fields with current node values
+    const settings = node.getSettings();
+    this.dialog.querySelector('#node-text').value = settings.text;
+    this.dialog.querySelector('#node-link').value = settings.link || '';
+    
+    // Fill color
+    this.dialog.querySelector('#node-fill-color').value = settings.fillColor;
+    this.dialog.querySelector('#node-fill-color-text').value = settings.fillColor.toUpperCase();
+    
+    // Font color
+    this.dialog.querySelector('#node-font-color').value = settings.fontColor;
+    this.dialog.querySelector('#node-font-color-text').value = settings.fontColor.toUpperCase();
+    
+    // Font size
+    this.dialog.querySelector('#node-font-size').value = settings.fontSize;
+    
+    // Outline color
+    this.dialog.querySelector('#node-outline-color').value = settings.outlineColor;
+    this.dialog.querySelector('#node-outline-color-text').value = settings.outlineColor.toUpperCase();
+    
+    // Outline width
+    this.dialog.querySelector('#node-outline-width').value = settings.outlineWidth;
+
+    // Show dialog
+    this.dialog.style.display = 'block';
+
+    // Position beside cursor with boundary checks
+    this.positionDialog(cursorX, cursorY);
+
+    // Focus on text input
+    setTimeout(() => {
+      const textInput = this.dialog.querySelector('#node-text');
+      textInput.focus();
+      textInput.setSelectionRange(textInput.value.length, textInput.value.length);
+    }, 10);
+  }
+
+  positionDialog(cursorX, cursorY) {
+    // Get dialog dimensions
+    const dialogRect = this.dialog.getBoundingClientRect();
+    const dialogWidth = dialogRect.width;
+    const dialogHeight = dialogRect.height;
+
+    // Get viewport dimensions
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // Default position: beside cursor (to the right)
+    let left = cursorX + 20; // 20px offset to the right
+    let top = cursorY;
+
+    // Adjust horizontal position if dialog goes off screen
+    if (left + dialogWidth > viewportWidth) {
+      // Place to the left of cursor instead
+      left = cursorX - dialogWidth - 20;
+    }
+
+    // Ensure dialog doesn't go off the left edge
+    if (left < 10) {
+      left = 10;
+    }
+
+    // Adjust vertical position if dialog goes off screen
+    if (top + dialogHeight > viewportHeight) {
+      // Move up
+      top = viewportHeight - dialogHeight - 10;
+    }
+
+    // Ensure dialog doesn't go off the top edge
+    if (top < 10) {
+      top = 10;
+    }
+
+    this.dialog.style.left = `${left}px`;
+    this.dialog.style.top = `${top}px`;
+  }
+
+  saveSettings() {
+    if (!this.currentNode) return;
+
+    // Get text value and validate - prevent empty text
+    const textInput = this.dialog.querySelector('#node-text').value.trim();
+    if (textInput === '') {
+      alert('Text cannot be empty. Keeping original value.');
+      this.dialog.querySelector('#node-text').value = this.originalSettings.text;
+      return;
+    }
+
+    // Get values from inputs
+    const fontSizeInput = this.dialog.querySelector('#node-font-size').value.trim();
+    const outlineWidthInput = this.dialog.querySelector('#node-outline-width').value.trim();
+
+    // Parse and validate - use current value if empty or invalid
+    let fontSize = parseInt(fontSizeInput);
+    if (isNaN(fontSize) || fontSizeInput === '') {
+      fontSize = this.currentNode.fontSize; // Keep current value
     } else {
-      // Simple straight line
-      ctx.lineTo(end.x, end.y);
+      fontSize = Math.max(8, Math.min(48, fontSize)); // Validate range
     }
     
-    ctx.stroke();
+    let outlineWidth = parseInt(outlineWidthInput);
+    if (isNaN(outlineWidth) || outlineWidthInput === '') {
+      outlineWidth = this.currentNode.outlineWidth; // Keep current value
+    } else {
+      outlineWidth = Math.max(1, Math.min(10, outlineWidth)); // Validate range
+    }
+
+    const settings = {
+      text: textInput,
+      link: this.dialog.querySelector('#node-link').value,
+      fillColor: this.dialog.querySelector('#node-fill-color').value,
+      fontColor: this.dialog.querySelector('#node-font-color').value,
+      fontSize: fontSize,
+      outlineColor: this.dialog.querySelector('#node-outline-color').value,
+      outlineWidth: outlineWidth
+    };
+
+    this.currentNode.updateSettings(settings);
+    
+    // Clear original settings so hide() won't restore them
+    this.originalSettings = null;
+    
+    if (this.onSave) {
+      this.onSave(this.currentNode, settings);
+    }
+
+    this.hide();
   }
 
-  getControlPoint(point, port, offset) {
-    switch(port) {
-      case 'right':
-        return { x: point.x + offset, y: point.y };
-      case 'left':
-        return { x: point.x - offset, y: point.y };
-      case 'top':
-        return { x: point.x, y: point.y - offset };
-      case 'bottom':
-        return { x: point.x, y: point.y + offset };
-      default:
-        return point;
+  hide() {
+    // Restore original settings if they exist (means dialog was cancelled, not saved)
+    if (this.currentNode && this.originalSettings) {
+      this.currentNode.updateSettings(this.originalSettings);
+      // Trigger a render to show the restored values
+      if (this.canvas && this.canvas.render) {
+        this.canvas.render();
+      }
+    }
+    
+    this.dialog.style.display = 'none';
+    this.currentNode = null;
+    this.originalSettings = null;
+  }
+
+  destroy() {
+    if (this.dialog && this.dialog.parentNode) {
+      this.dialog.parentNode.removeChild(this.dialog);
+    }
+  }
+}
+
+// AreaSettingsDialog class
+// src/AreaSettingsDialog.js
+// Dialog for editing area properties
+
+class AreaSettingsDialog {
+  constructor(onSave, onCancel) {
+    this.onSave = onSave;
+    this.onCancel = onCancel;
+    this.dialog = null;
+    this.area = null;
+  }
+
+  show(area, x, y) {
+    this.area = area;
+    this.createDialog(x, y);
+  }
+
+  createDialog(x, y) {
+    if (this.dialog) {
+      this.close();
+    }
+
+    this.dialog = document.createElement('div');
+    this.dialog.style.cssText = `
+      position: fixed;
+      background: white;
+      border: 2px solid #2196F3;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10000;
+      min-width: 300px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    `;
+
+    const settings = this.area.getSettings();
+
+    this.dialog.innerHTML = `
+      <div style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 15px 0; color: #333; font-size: 18px;">Area Settings</h3>
+        
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; margin-bottom: 5px; color: #555; font-size: 13px;">Title:</label>
+          <input type="text" id="areaTitle" value="${settings.title}" 
+                 style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; margin-bottom: 5px; color: #555; font-size: 13px;">Fill Color:</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="color" id="areaFillColorPicker" value="${this.rgbaToHex(settings.fillColor)}"
+                   style="width: 50px; height: 35px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+            <input type="range" id="areaFillOpacity" min="0" max="100" value="${this.getOpacity(settings.fillColor)}"
+                   style="flex: 1;">
+            <span id="areaFillOpacityValue" style="min-width: 40px; color: #555; font-size: 13px;">${this.getOpacity(settings.fillColor)}%</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; margin-bottom: 5px; color: #555; font-size: 13px;">Outline Color:</label>
+          <input type="color" id="areaOutlineColor" value="${settings.outlineColor}"
+                 style="width: 50px; height: 35px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; margin-bottom: 5px; color: #555; font-size: 13px;">Title Background:</label>
+          <input type="color" id="areaTitleBgColor" value="${settings.titleBgColor}"
+                 style="width: 50px; height: 35px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button id="areaCancelBtn" style="padding: 8px 16px; background: #f5f5f5; border: 1px solid #ddd; 
+                border-radius: 4px; cursor: pointer; font-size: 14px;">Cancel</button>
+        <button id="areaSaveBtn" style="padding: 8px 16px; background: #2196F3; color: white; border: none; 
+                border-radius: 4px; cursor: pointer; font-size: 14px;">Save</button>
+      </div>
+    `;
+
+    document.body.appendChild(this.dialog);
+
+    // Position the dialog beside the cursor, adjusting if off-screen
+    const dialogRect = this.dialog.getBoundingClientRect();
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    
+    // Default: position to the right of cursor
+    let finalX = x + 20;
+    let finalY = y;
+    
+    // Check if dialog goes off right edge
+    if (finalX + dialogRect.width > windowWidth) {
+      // Position to the left of cursor instead
+      finalX = x - dialogRect.width - 20;
+    }
+    
+    // Check if dialog goes off left edge
+    if (finalX < 10) {
+      finalX = 10;
+    }
+    
+    // Check if dialog goes off bottom
+    if (finalY + dialogRect.height > windowHeight) {
+      finalY = windowHeight - dialogRect.height - 10;
+    }
+    
+    // Check if dialog goes off top
+    if (finalY < 10) {
+      finalY = 10;
+    }
+    
+    this.dialog.style.left = finalX + 'px';
+    this.dialog.style.top = finalY + 'px';
+
+    // Event listeners
+    const opacitySlider = document.getElementById('areaFillOpacity');
+    const opacityValue = document.getElementById('areaFillOpacityValue');
+    
+    opacitySlider.addEventListener('input', () => {
+      opacityValue.textContent = opacitySlider.value + '%';
+    });
+
+    document.getElementById('areaSaveBtn').addEventListener('click', () => {
+      this.save();
+    });
+
+    document.getElementById('areaCancelBtn').addEventListener('click', () => {
+      this.close();
+      if (this.onCancel) this.onCancel();
+    });
+
+    // Prevent dialog from closing when clicking inside
+    this.dialog.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+
+    // Close on outside click
+    setTimeout(() => {
+      document.addEventListener('click', this.handleOutsideClick);
+    }, 100);
+  }
+
+  handleOutsideClick = (e) => {
+    if (this.dialog && !this.dialog.contains(e.target)) {
+      this.close();
+      if (this.onCancel) this.onCancel();
+    }
+  };
+
+  save() {
+    const title = document.getElementById('areaTitle').value;
+    const fillColorHex = document.getElementById('areaFillColorPicker').value;
+    const fillOpacity = document.getElementById('areaFillOpacity').value / 100;
+    const fillColor = this.hexToRgba(fillColorHex, fillOpacity);
+    const outlineColor = document.getElementById('areaOutlineColor').value;
+    const titleBgColor = document.getElementById('areaTitleBgColor').value;
+
+    if (this.onSave) {
+      this.onSave({
+        title,
+        fillColor,
+        outlineColor,
+        titleBgColor
+      });
+    }
+
+    this.close();
+  }
+
+  close() {
+    if (this.dialog) {
+      document.removeEventListener('click', this.handleOutsideClick);
+      this.dialog.remove();
+      this.dialog = null;
     }
   }
 
-  needsBendingPath(start, end) {
-    // Simple heuristic: if distance is large or not aligned, use curves
-    const dx = Math.abs(end.x - start.x);
-    const dy = Math.abs(end.y - start.y);
-    return dx > 50 || dy > 50;
+  rgbaToHex(rgba) {
+    const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (match) {
+      const r = parseInt(match[1]).toString(16).padStart(2, '0');
+      const g = parseInt(match[2]).toString(16).padStart(2, '0');
+      const b = parseInt(match[3]).toString(16).padStart(2, '0');
+      return `#${r}${g}${b}`;
+    }
+    return '#2196F3';
+  }
+
+  getOpacity(rgba) {
+    const match = rgba.match(/rgba?\([^,]+,[^,]+,[^,]+,?\s*([0-9.]+)?\)/);
+    if (match && match[1]) {
+      return Math.round(parseFloat(match[1]) * 100);
+    }
+    return 100;
+  }
+
+  hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 }
 
@@ -470,1099 +1236,670 @@ class Connection {
 
 
 
+
+
+
+
 class FlowchartCanvas {
   constructor(containerId, options = {}) {
-    // Get the container element
     this.container = document.getElementById(containerId);
     if (!this.container) {
-      throw new Error(`Container element '${containerId}' not found!`);
+      throw new Error(`Container with id "${containerId}" not found`);
     }
-    
-    // Configuration options
+
     this.options = {
       mode: options.mode || 'edit',
-      width: options.width || null,
-      height: options.height || null,
-      readonly: options.readonly || false,
       pixelRatio: options.pixelRatio || window.devicePixelRatio || 1,
-      minZoom: options.minZoom || 0.1,
-      maxZoom: options.maxZoom || 5
+      ...options
     };
 
-    // Pan and Zoom state
-    this.panX = 0;
-    this.panY = 0;
-    this.zoom = 1;
-    this.isPanning = false;
-    this.panStartX = 0;
-    this.panStartY = 0;
-
-    // Node and connection storage
-    this.nodes = [];
-    this.connections = [];
-    this.nodeIdCounter = 0;
-    this.connectionIdCounter = 0;
-
-    // Selection state
-    this.selectedNode = null;
-    this.selectedConnection = null;
-
-    // Dragging state
-    this.isDragging = false;
-    this.dragOffsetX = 0;
-    this.dragOffsetY = 0;
-
-    // Resizing state
-    this.isResizing = false;
-    this.resizeHandle = null;
-    this.resizeStartWidth = 0;
-    this.resizeStartHeight = 0;
-    this.resizeStartX = 0;
-    this.resizeStartY = 0;
-    this.resizeStartNodeX = 0;
-    this.resizeStartNodeY = 0;
-
-    // Connection creation state
-    this.isConnecting = false;
-    this.connectionStart = null;
-    this.connectionStartPort = null;
-    this.tempConnectionEnd = null;
-
-    // Connection reconnection state
-    this.isReconnecting = false;
-    this.reconnectingConnection = null;
-    this.reconnectingEnd = null;
-
-    // Text editing state
-    this.editingNode = null;
-    this.textInput = null;
-    this.originalNodeText = null;
-
-    // History management
-    this.history = [];
-    this.historyIndex = -1;
-    this.maxHistorySize = 50;
-
-    // Clipboard
-    this.clipboard = null;
-    
-    // Initialize the canvas
-    this.init();
-    
-    // Setup resize observer for responsive canvas
-    this.setupResizeObserver();
-    
-    this.saveState();
-  }
-  
-  // ============================================================================
-  // Initialization
-  // ============================================================================
-  
-  init() {  
-    // Ensure container can hold full-size canvas
-    this.container.style.position = this.container.style.position || 'relative';
-    this.container.style.width = this.container.style.width || '100%';
-    this.container.style.height = this.container.style.height || '100%';
-    
-    // Create canvas element
     this.canvas = document.createElement('canvas');
-    this.canvas.style.border = '1px solid #ccc';
-    this.canvas.style.cursor = 'grab';
-    this.canvas.style.width = '100%';
-    this.canvas.style.height = '100%';
-    this.canvas.style.display = 'block';
-    this.canvas.style.boxSizing = 'border-box';
-    
     this.ctx = this.canvas.getContext('2d');
     this.container.appendChild(this.canvas);
-    
-    // Set initial size
-    this.updateCanvasSize();
-    
-    // Add event listeners (only if not readonly)
-    if (!this.options.readonly) {
-      this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-      this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-      this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
-      this.canvas.addEventListener('dblclick', (e) => this.handleDoubleClick(e));
-      this.canvas.addEventListener('wheel', (e) => this.handleWheel(e));
-      this.canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent right-click menu
-      document.addEventListener('keydown', (e) => this.handleKeyDown(e));
-      document.addEventListener('keyup', (e) => this.handleKeyUp(e));
-    }
-    
-    this.render();
-  }
 
-  setupResizeObserver() {
-    if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => {
-        this.updateCanvasSize();
-        this.render();
-      });
-      this.resizeObserver.observe(this.container);
-    } else {
-      window.addEventListener('resize', () => {
-        this.updateCanvasSize();
-        this.render();
-      });
-    }
-  }
-
-  updateCanvasSize() {
-    const rect = this.container.getBoundingClientRect();
-    
-    const displayWidth = this.options.width || rect.width;
-    const displayHeight = this.options.height || rect.height;
-    
-    const pixelRatio = this.options.pixelRatio;
-    this.canvas.width = displayWidth * pixelRatio;
-    this.canvas.height = displayHeight * pixelRatio;
-    
-    this.canvas.style.width = displayWidth + 'px';
-    this.canvas.style.height = displayHeight + 'px';
-    
-    // Store logical dimensions for coordinate calculations
-    this.logicalWidth = displayWidth;
-    this.logicalHeight = displayHeight;
-  }
-
-  // ============================================================================
-  // Pan & Zoom Methods
-  // ============================================================================
-
-  screenToWorld(screenX, screenY) {
-    // Convert screen coordinates to world coordinates
-    return {
-      x: (screenX - this.panX) / this.zoom,
-      y: (screenY - this.panY) / this.zoom
-    };
-  }
-
-  worldToScreen(worldX, worldY) {
-    // Convert world coordinates to screen coordinates
-    return {
-      x: worldX * this.zoom + this.panX,
-      y: worldY * this.zoom + this.panY
-    };
-  }
-
-  zoomAt(x, y, delta) {
-    // Zoom centered at point (x, y)
-    const worldPosBefore = this.screenToWorld(x, y);
-    
-    const zoomFactor = delta > 0 ? 1.1 : 0.9;
-    this.zoom = Math.max(
-      this.options.minZoom,
-      Math.min(this.options.maxZoom, this.zoom * zoomFactor)
-    );
-    
-    const worldPosAfter = this.screenToWorld(x, y);
-    
-    // Adjust pan to keep the point under cursor
-    this.panX += (worldPosAfter.x - worldPosBefore.x) * this.zoom;
-    this.panY += (worldPosAfter.y - worldPosBefore.y) * this.zoom;
-  }
-
-  resetView() {
-    this.panX = 0;
-    this.panY = 0;
-    this.zoom = 1;
-    this.render();
-  }
-
-  fitToContent() {
-    if (this.nodes.length === 0) return;
-    
-    // Calculate bounding box
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
-    
-    for (let node of this.nodes) {
-      minX = Math.min(minX, node.x - node.width / 2);
-      minY = Math.min(minY, node.y - node.height / 2);
-      maxX = Math.max(maxX, node.x + node.width / 2);
-      maxY = Math.max(maxY, node.y + node.height / 2);
-    }
-    
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
-    const padding = 50;
-    
-    // Calculate zoom to fit
-    const zoomX = (this.logicalWidth - padding * 2) / contentWidth;
-    const zoomY = (this.logicalHeight - padding * 2) / contentHeight;
-    this.zoom = Math.min(zoomX, zoomY, 1);
-    
-    // Center content
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    this.panX = this.logicalWidth / 2 - centerX * this.zoom;
-    this.panY = this.logicalHeight / 2 - centerY * this.zoom;
-    
-    this.render();
-  }
-
-  // ============================================================================
-  // Node Management
-  // ============================================================================
-  
-  addNode(type, text, x, y) {
-    const id = `node-${this.nodeIdCounter++}`;
-    // If x and y are not provided, add node at center of viewport
-    if (x === undefined || y === undefined) {
-      const center = this.screenToWorld(this.logicalWidth / 2, this.logicalHeight / 2);
-      x = center.x;
-      y = center.y;
-    }
-    const node = new Node(id, type, x, y, text);
-    this.nodes.push(node);
-    this.render();
-    this.saveState();
-    return node;
-  }
-
-  deleteNode(node) {
-    // Remove all connections associated with this node
-    this.connections = this.connections.filter(conn => 
-      conn.fromNode !== node && conn.toNode !== node
-    );
-    
-    this.nodes = this.nodes.filter(n => n !== node);
-    this.selectedNode = null;
-    this.render();
-    this.saveState();
-  }
-
-  // ============================================================================
-  // Connection Management
-  // ============================================================================
-
-  addConnection(fromNode, fromPort, toNode, toPort) {
-    // Prevent self-connections
-    if (fromNode === toNode) {
-      return null;
-    }
-    
-    // Check if exact connection already exists
-    for (let conn of this.connections) {
-      if (conn.fromNode === fromNode && conn.toNode === toNode &&
-          conn.fromPort === fromPort && conn.toPort === toPort) {
-        return null; // Connection already exists
-      }
-    }
-    
-    // Create new connection (allows multiple connections from same node)
-    const id = `conn-${this.connectionIdCounter++}`;
-    const connection = new Connection(id, fromNode, fromPort, toNode, toPort);
-    this.connections.push(connection);
-    this.render();
-    this.saveState();
-    return connection;
-  }
-
-  deleteConnection(connection) {
-    this.connections = this.connections.filter(conn => conn !== connection);
-    this.selectedConnection = null;
-    this.render();
-    this.saveState();
-  }
-
-  getConnectionEndpointAt(worldX, worldY, threshold = 15) {
-    const screenThreshold = threshold / this.zoom;
-    
-    for (let conn of this.connections) {
-      const start = conn.getPortPosition(conn.fromNode, conn.fromPort);
-      const end = conn.getPortPosition(conn.toNode, conn.toPort);
-      
-      const distToStart = Math.sqrt((worldX - start.x) ** 2 + (worldY - start.y) ** 2);
-      if (distToStart < screenThreshold) {
-        return { connection: conn, endpoint: 'start' };
-      }
-      
-      const distToEnd = Math.sqrt((worldX - end.x) ** 2 + (worldY - end.y) ** 2);
-      if (distToEnd < screenThreshold) {
-        return { connection: conn, endpoint: 'end' };
-      }
-    }
-    
-    return null;
-  }
-
-  // ============================================================================
-  // Rendering
-  // ============================================================================
-  
-  render() {
-    const pixelRatio = this.options.pixelRatio;
-    
-    // Reset transform and clear canvas
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    
-    // Apply pixel ratio for crisp rendering
-    this.ctx.scale(pixelRatio, pixelRatio);
-    
-    // Fill background
-    this.ctx.fillStyle = '#f9f9f9';
-    this.ctx.fillRect(0, 0, this.logicalWidth, this.logicalHeight);
-    
-    // Apply pan and zoom transform
-    this.ctx.translate(this.panX, this.panY);
-    this.ctx.scale(this.zoom, this.zoom);
-    
-    // Draw grid
-    this.drawGrid();
-    
-    // Draw all connections
-    for (let conn of this.connections) {
-      const isSelected = conn === this.selectedConnection;
-      
-      if (this.isReconnecting && conn === this.reconnectingConnection) {
-        continue;
-      }
-      
-      conn.draw(this.ctx, isSelected);
-    }
-    
-    // Draw reconnection preview
-    if (this.isReconnecting && this.reconnectingConnection && this.tempConnectionEnd) {
-      this.drawReconnectionPreview();
-    }
-    
-    // Draw temporary connection line
-    if (this.isConnecting && this.connectionStart && this.tempConnectionEnd) {
-      this.drawConnectionPreview();
-    }
-    
-    // Draw all nodes
-    for (let node of this.nodes) {
-      const isSelected = node === this.selectedNode;
-      node.draw(this.ctx, isSelected);
-    }
-    
-    // Reset transform for UI elements
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.ctx.scale(pixelRatio, pixelRatio);
-    
-    // Show helper text and zoom info
-    this.drawUIOverlay();
-  }
-  
-  drawGrid() {
-    const gridSize = 20;
-    const worldBounds = {
-      left: this.screenToWorld(0, 0).x,
-      top: this.screenToWorld(0, 0).y,
-      right: this.screenToWorld(this.logicalWidth, this.logicalHeight).x,
-      bottom: this.screenToWorld(this.logicalWidth, this.logicalHeight).y
-    };
-    
-    this.ctx.strokeStyle = '#e0e0e0';
-    this.ctx.lineWidth = 1 / this.zoom;
-    
-    const startX = Math.floor(worldBounds.left / gridSize) * gridSize;
-    const endX = Math.ceil(worldBounds.right / gridSize) * gridSize;
-    const startY = Math.floor(worldBounds.top / gridSize) * gridSize;
-    const endY = Math.ceil(worldBounds.bottom / gridSize) * gridSize;
-    
-    // Vertical lines
-    for (let x = startX; x <= endX; x += gridSize) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(x, worldBounds.top);
-      this.ctx.lineTo(x, worldBounds.bottom);
-      this.ctx.stroke();
-    }
-    
-    // Horizontal lines
-    for (let y = startY; y <= endY; y += gridSize) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(worldBounds.left, y);
-      this.ctx.lineTo(worldBounds.right, y);
-      this.ctx.stroke();
-    }
-  }
-
-  drawUIOverlay() {
-    // Show zoom level and instructions
-    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    this.ctx.fillRect(10, 10, 220, 100);
-    
-    this.ctx.fillStyle = '#fff';
-    this.ctx.font = '12px Arial';
-    this.ctx.textAlign = 'left';
-    this.ctx.fillText(`Zoom: ${(this.zoom * 100).toFixed(0)}%`, 20, 30);
-    this.ctx.fillText(`Pan: (${Math.round(this.panX)}, ${Math.round(this.panY)})`, 20, 50);
-    this.ctx.fillText('Drag Empty Space: Pan', 20, 70);
-    this.ctx.fillText('Scroll: Zoom', 20, 85);
-    this.ctx.fillText('Ctrl+0: Reset | Ctrl+1: Fit', 20, 100);
-    
-    // Show helper text if no nodes
-    if (this.nodes.length === 0) {
-      this.ctx.fillStyle = '#999';
-      this.ctx.font = '16px Arial';
-      this.ctx.textAlign = 'center';
-      this.ctx.fillText('Add nodes using buttons below', this.logicalWidth / 2, this.logicalHeight / 2);
-      this.ctx.fillText('Drag empty space to pan, scroll to zoom', this.logicalWidth / 2, this.logicalHeight / 2 + 25);
-    }
-  }
-
-  drawReconnectionPreview() {
-    const conn = this.reconnectingConnection;
-    let startPos, endPos;
-    
-    if (this.reconnectingEnd === 'start') {
-      startPos = this.tempConnectionEnd;
-      endPos = conn.getPortPosition(conn.toNode, conn.toPort);
-    } else {
-      startPos = conn.getPortPosition(conn.fromNode, conn.fromPort);
-      endPos = this.tempConnectionEnd;
-    }
-    
-    this.ctx.strokeStyle = '#000';
-    this.ctx.lineWidth = 2 / this.zoom;
-    this.ctx.setLineDash([]);
-    this.ctx.beginPath();
-    this.ctx.moveTo(startPos.x, startPos.y);
-    this.ctx.lineTo(endPos.x, endPos.y);
-    this.ctx.stroke();
-  }
-
-  drawConnectionPreview() {
-    const startPos = this.connectionStart.getConnectionPoints().find(
-      p => p.position === this.connectionStartPort
-    );
-    
-    this.ctx.strokeStyle = '#000';
-    this.ctx.lineWidth = 2 / this.zoom;
-    this.ctx.setLineDash([]);
-    this.ctx.beginPath();
-    this.ctx.moveTo(startPos.x, startPos.y);
-    this.ctx.lineTo(this.tempConnectionEnd.x, this.tempConnectionEnd.y);
-    this.ctx.stroke();
-  }
-
-  clear() {
     this.nodes = [];
     this.connections = [];
+    this.areas = [];
     this.selectedNode = null;
     this.selectedConnection = null;
-    this.nodeIdCounter = 0;
-    this.connectionIdCounter = 0;
+    this.selectedArea = null;
+    this.draggingNode = null;
+    this.draggingArea = null;
+    this.resizingNode = null;
+    this.resizingArea = null;
+    this.resizeHandle = null;
+    this.connectingFrom = null;
+    this.connectingTo = null;
+    this.markingArea = false;
+    this.areaStart = null;
+    this.areaEnd = null;
+    this.panOffset = { x: 0, y: 0 };
+    this.isPanning = false;
+    this.panStart = { x: 0, y: 0 };
+    this.spacePressed = false;
+    this.zoom = 1;
+    this.history = [];
+    this.historyIndex = -1;
+    this.nodeIdCounter = 1;
+    this.connectionIdCounter = 1;
+    this.areaIdCounter = 1;
+
+    // Double-click tracking
+    this.lastClickTime = 0;
+    this.lastClickNode = null;
+    this.lastClickArea = null;
+    this.doubleClickDelay = 300; // milliseconds
+
+    this.nodeSettingsDialog = new NodeSettingsDialog(this);
+    this.nodeSettingsDialog.onSave = () => {
+      this.saveState();
+      this.render();
+    };
+
+    this.areaSettingsDialog = new AreaSettingsDialog(
+      (settings) => {
+        if (this.selectedArea) {
+          this.selectedArea.updateSettings(settings);
+          this.saveState();
+          this.render();
+        }
+      },
+      () => {
+        this.render();
+      }
+    );
+
+    this.setupCanvas();
+    this.setupEventListeners();
+    this.saveState(); // Save initial empty state
     this.render();
   }
 
-  // ============================================================================
-  // Mouse Event Handlers
-  // ============================================================================
+  setupCanvas() {
+    const resizeCanvas = () => {
+      const rect = this.container.getBoundingClientRect();
+      this.canvas.width = rect.width * this.options.pixelRatio;
+      this.canvas.height = rect.height * this.options.pixelRatio;
+      this.canvas.style.width = rect.width + 'px';
+      this.canvas.style.height = rect.height + 'px';
+      this.ctx.scale(this.options.pixelRatio, this.options.pixelRatio);
+      this.render();
+    };
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    this.canvas.style.display = 'block';
+    this.canvas.style.touchAction = 'none';
+  }
+
+  setupEventListeners() {
+    this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
+    this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+    this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
+    this.canvas.addEventListener('wheel', this.handleWheel.bind(this));
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('keydown', this.handleKeyDown.bind(this));
+    document.addEventListener('keyup', this.handleKeyUp.bind(this));
+  }
 
   getMousePos(e) {
     const rect = this.canvas.getBoundingClientRect();
-    const scaleX = this.logicalWidth / rect.width;
-    const scaleY = this.logicalHeight / rect.height;
+    const scaleX = this.canvas.width / this.options.pixelRatio / rect.width;
+    const scaleY = this.canvas.height / this.options.pixelRatio / rect.height;
     
-    const screenX = (e.clientX - rect.left) * scaleX;
-    const screenY = (e.clientY - rect.top) * scaleY;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     
-    // Return both screen and world coordinates
-    const world = this.screenToWorld(screenX, screenY);
     return {
-      screen: { x: screenX, y: screenY },
-      world: { x: world.x, y: world.y }
+      x: (x - this.panOffset.x) / this.zoom,
+      y: (y - this.panOffset.y) / this.zoom
     };
+  }
+
+  handleMouseDown(e) {
+    if (this.options.mode !== 'edit') return;
+
+    const pos = this.getMousePos(e);
+
+    // Panning with middle mouse, right-click, Ctrl+click, or Space+click (higher priority)
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && (e.ctrlKey || this.spacePressed))) {
+      this.isPanning = true;
+      this.panStart = { x: e.clientX - this.panOffset.x, y: e.clientY - this.panOffset.y };
+      this.canvas.style.cursor = 'grabbing';
+      return;
+    }
+
+    // Area marking mode
+    if (this.markingArea) {
+      this.areaStart = { x: pos.x, y: pos.y };
+      return;
+    }
+
+    // Check area resize handles first
+    for (let area of [...this.areas].reverse()) {
+      const resizeHandle = area.isOnResizeHandle(pos.x, pos.y, this.zoom);
+      if (resizeHandle && area === this.selectedArea) {
+        this.resizingArea = area;
+        this.resizeHandle = resizeHandle;
+        this.resizeStart = { 
+          x: pos.x, y: pos.y, 
+          x1: area.x1, y1: area.y1, 
+          x2: area.x2, y2: area.y2 
+        };
+        return;
+      }
+    }
+
+    // Check area title bars for dragging
+    for (let area of [...this.areas].reverse()) {
+      if (area.isOnTitleBar(pos.x, pos.y)) {
+        const currentTime = Date.now();
+        const timeDiff = currentTime - this.lastClickTime;
+
+        // Check for double-click on area
+        if (this.lastClickArea === area && timeDiff < this.doubleClickDelay) {
+          // Double-click detected - open settings dialog
+          this.openAreaSettings(area, e.clientX, e.clientY);
+          this.lastClickTime = 0;
+          this.lastClickArea = null;
+          return;
+        }
+
+        // Single click - select and prepare for drag
+        this.lastClickTime = currentTime;
+        this.lastClickArea = area;
+        this.selectedArea = area;
+        this.selectedNode = null;
+        this.selectedConnection = null;
+        this.draggingArea = area;
+        this.dragStart = { 
+          x: pos.x - area.x1, 
+          y: pos.y - area.y1,
+          width: area.width,
+          height: area.height
+        };
+        this.render();
+        return;
+      }
+    }
+
+    for (let node of this.nodes) {
+      const connectionPoint = node.isOnConnectionPoint(pos.x, pos.y, this.zoom);
+      if (connectionPoint) {
+        this.connectingFrom = { node, point: connectionPoint };
+        this.selectedNode = null;
+        this.selectedConnection = null;
+        this.selectedArea = null;
+        this.render();
+        return;
+      }
+
+      const resizeHandle = node.isOnResizeHandle(pos.x, pos.y, this.zoom);
+      if (resizeHandle && node === this.selectedNode) {
+        this.resizingNode = node;
+        this.resizeHandle = resizeHandle;
+        this.resizeStart = { x: pos.x, y: pos.y, width: node.width, height: node.height };
+        return;
+      }
+
+      if (node.containsPoint(pos.x, pos.y)) {
+        const currentTime = Date.now();
+        const timeDiff = currentTime - this.lastClickTime;
+
+        // Check for double-click
+        if (this.lastClickNode === node && timeDiff < this.doubleClickDelay) {
+          // Double-click detected - open settings dialog
+          const rect = this.canvas.getBoundingClientRect();
+          this.openNodeSettings(node, e.clientX, e.clientY);
+          this.lastClickTime = 0;
+          this.lastClickNode = null;
+          return;
+        }
+
+        // Single click - just select and prepare for drag
+        this.lastClickTime = currentTime;
+        this.lastClickNode = node;
+        this.selectedNode = node;
+        this.selectedConnection = null;
+        this.selectedArea = null;
+        this.draggingNode = node;
+        this.dragStart = { x: pos.x - node.x, y: pos.y - node.y };
+        this.render();
+        return;
+      }
+    }
+
+    for (let connection of this.connections) {
+      if (connection.isNearPoint(pos.x, pos.y, this.zoom)) {
+        this.selectedConnection = connection;
+        this.selectedNode = null;
+        this.selectedArea = null;
+        this.render();
+        return;
+      }
+    }
+
+    // Check if clicking inside an area
+    for (let area of [...this.areas].reverse()) {
+      if (area.containsPoint(pos.x, pos.y)) {
+        this.selectedArea = area;
+        this.selectedNode = null;
+        this.selectedConnection = null;
+        this.render();
+        return;
+      }
+    }
+
+    // Clicked on empty space - deselect and start panning
+    this.selectedNode = null;
+    this.selectedConnection = null;
+    this.selectedArea = null;
+    
+    // If not in area marking mode, clicking empty space starts panning
+    if (!this.markingArea) {
+      this.isPanning = true;
+      this.panStart = { x: e.clientX - this.panOffset.x, y: e.clientY - this.panOffset.y };
+      this.canvas.style.cursor = 'grabbing';
+    }
+    
+    this.render();
+  }
+
+  handleMouseMove(e) {
+    if (this.options.mode !== 'edit') return;
+
+    const pos = this.getMousePos(e);
+
+    // Area marking mode
+    if (this.markingArea && this.areaStart) {
+      this.areaEnd = { x: pos.x, y: pos.y };
+      this.render();
+      return;
+    }
+
+    if (this.isPanning) {
+      this.panOffset.x = e.clientX - this.panStart.x;
+      this.panOffset.y = e.clientY - this.panStart.y;
+      this.render();
+      return;
+    }
+
+    if (this.connectingFrom) {
+      this.connectingTo = pos;
+      this.render();
+
+      for (let node of this.nodes) {
+        if (node !== this.connectingFrom.node) {
+          const connectionPoint = node.isOnConnectionPoint(pos.x, pos.y, this.zoom);
+          if (connectionPoint) {
+            this.connectingTo = { node, point: connectionPoint };
+            break;
+          }
+        }
+      }
+      return;
+    }
+
+    if (this.resizingArea) {
+      const dx = pos.x - this.resizeStart.x;
+      const dy = pos.y - this.resizeStart.y;
+
+      switch (this.resizeHandle.position) {
+        case 'top-left':
+          this.resizingArea.x1 = Math.min(this.resizeStart.x1 + dx, this.resizeStart.x2 - 50);
+          this.resizingArea.y1 = Math.min(this.resizeStart.y1 + dy, this.resizeStart.y2 - 50);
+          break;
+        case 'top-right':
+          this.resizingArea.x2 = Math.max(this.resizeStart.x2 + dx, this.resizeStart.x1 + 50);
+          this.resizingArea.y1 = Math.min(this.resizeStart.y1 + dy, this.resizeStart.y2 - 50);
+          break;
+        case 'bottom-right':
+          this.resizingArea.x2 = Math.max(this.resizeStart.x2 + dx, this.resizeStart.x1 + 50);
+          this.resizingArea.y2 = Math.max(this.resizeStart.y2 + dy, this.resizeStart.y1 + 50);
+          break;
+        case 'bottom-left':
+          this.resizingArea.x1 = Math.min(this.resizeStart.x1 + dx, this.resizeStart.x2 - 50);
+          this.resizingArea.y2 = Math.max(this.resizeStart.y2 + dy, this.resizeStart.y1 + 50);
+          break;
+        case 'top':
+          this.resizingArea.y1 = Math.min(this.resizeStart.y1 + dy, this.resizeStart.y2 - 50);
+          break;
+        case 'right':
+          this.resizingArea.x2 = Math.max(this.resizeStart.x2 + dx, this.resizeStart.x1 + 50);
+          break;
+        case 'bottom':
+          this.resizingArea.y2 = Math.max(this.resizeStart.y2 + dy, this.resizeStart.y1 + 50);
+          break;
+        case 'left':
+          this.resizingArea.x1 = Math.min(this.resizeStart.x1 + dx, this.resizeStart.x2 - 50);
+          break;
+      }
+
+      this.render();
+      return;
+    }
+
+    if (this.draggingArea) {
+      const newX1 = pos.x - this.dragStart.x;
+      const newY1 = pos.y - this.dragStart.y;
+      this.draggingArea.x1 = newX1;
+      this.draggingArea.y1 = newY1;
+      this.draggingArea.x2 = newX1 + this.dragStart.width;
+      this.draggingArea.y2 = newY1 + this.dragStart.height;
+      this.render();
+      return;
+    }
+
+    if (this.resizingNode) {
+      const dx = pos.x - this.resizeStart.x;
+      const dy = pos.y - this.resizeStart.y;
+
+      switch (this.resizeHandle.position) {
+        case 'top-left':
+          this.resizingNode.width = Math.max(60, this.resizeStart.width - dx * 2);
+          this.resizingNode.height = Math.max(40, this.resizeStart.height - dy * 2);
+          break;
+        case 'top-right':
+          this.resizingNode.width = Math.max(60, this.resizeStart.width + dx * 2);
+          this.resizingNode.height = Math.max(40, this.resizeStart.height - dy * 2);
+          break;
+        case 'bottom-right':
+          this.resizingNode.width = Math.max(60, this.resizeStart.width + dx * 2);
+          this.resizingNode.height = Math.max(40, this.resizeStart.height + dy * 2);
+          break;
+        case 'bottom-left':
+          this.resizingNode.width = Math.max(60, this.resizeStart.width - dx * 2);
+          this.resizingNode.height = Math.max(40, this.resizeStart.height + dy * 2);
+          break;
+      }
+
+      this.render();
+      return;
+    }
+
+    if (this.draggingNode) {
+      this.draggingNode.x = pos.x - this.dragStart.x;
+      this.draggingNode.y = pos.y - this.dragStart.y;
+      this.render();
+      return;
+    }
+
+    let cursor = 'default';
+    
+    // Space key pressed - show grab cursor
+    if (this.spacePressed && !this.isPanning) {
+      cursor = 'grab';
+    } else if (this.markingArea) {
+      cursor = 'crosshair';
+    } else {
+      for (let area of this.areas) {
+        if (area === this.selectedArea && area.isOnResizeHandle(pos.x, pos.y, this.zoom)) {
+          cursor = 'nwse-resize';
+          break;
+        }
+        if (area.isOnTitleBar(pos.x, pos.y)) {
+          cursor = 'move';
+          break;
+        }
+      }
+
+      if (cursor === 'default') {
+        for (let node of this.nodes) {
+          if (node.isOnConnectionPoint(pos.x, pos.y, this.zoom)) {
+            cursor = 'crosshair';
+            break;
+          }
+          if (node === this.selectedNode && node.isOnResizeHandle(pos.x, pos.y, this.zoom)) {
+            cursor = 'nwse-resize';
+            break;
+          }
+          if (node.containsPoint(pos.x, pos.y)) {
+            cursor = 'move';
+            break;
+          }
+        }
+      }
+
+      if (cursor === 'default') {
+        for (let connection of this.connections) {
+          if (connection.isNearPoint(pos.x, pos.y, this.zoom)) {
+            cursor = 'pointer';
+            break;
+          }
+        }
+      }
+      
+      // If still default and not in marking mode, show grab cursor for empty space
+      if (cursor === 'default' && !this.markingArea) {
+        cursor = 'grab';
+      }
+    }
+
+    this.canvas.style.cursor = cursor;
+  }
+
+  handleMouseUp(e) {
+    if (this.options.mode !== 'edit') return;
+
+    // Area marking complete
+    if (this.markingArea && this.areaStart && this.areaEnd) {
+      const area = new Area(
+        `area_${this.areaIdCounter++}`,
+        this.areaStart.x,
+        this.areaStart.y,
+        this.areaEnd.x,
+        this.areaEnd.y
+      );
+      
+      this.areas.push(area);
+      this.selectedArea = area;
+      this.markingArea = false;
+      this.areaStart = null;
+      this.areaEnd = null;
+      
+      // Trigger callback to update button state
+      if (this.onAreaMarkingComplete) {
+        this.onAreaMarkingComplete();
+      }
+      
+      // Open settings dialog
+      const rect = this.canvas.getBoundingClientRect();
+      this.areaSettingsDialog.show(area, e.clientX, e.clientY);
+      
+      this.saveState();
+      this.render();
+      return;
+    }
+
+    if (this.isPanning) {
+      this.isPanning = false;
+      this.canvas.style.cursor = 'default';
+      return;
+    }
+
+    if (this.connectingFrom && this.connectingTo) {
+      if (this.connectingTo.node) {
+        const fromPort = this.connectingFrom.point.position;
+        const toPort = this.connectingTo.point.position;
+        
+        const existingConnection = this.connections.find(conn => 
+          conn.fromNode === this.connectingFrom.node &&
+          conn.toNode === this.connectingTo.node &&
+          conn.fromPort === fromPort &&
+          conn.toPort === toPort
+        );
+
+        if (!existingConnection) {
+          const connection = new Connection(
+            `conn_${this.connectionIdCounter++}`,
+            this.connectingFrom.node,
+            fromPort,
+            this.connectingTo.node,
+            toPort
+          );
+          this.connections.push(connection);
+          this.saveState();
+        }
+      }
+      
+      this.connectingFrom = null;
+      this.connectingTo = null;
+      this.render();
+      return;
+    }
+
+    if (this.draggingArea) {
+      this.saveState();
+      this.draggingArea = null;
+    }
+
+    if (this.resizingArea) {
+      this.saveState();
+      this.resizingArea = null;
+      this.resizeHandle = null;
+    }
+
+    if (this.draggingNode) {
+      this.saveState();
+      this.draggingNode = null;
+    }
+
+    if (this.resizingNode) {
+      this.saveState();
+      this.resizingNode = null;
+      this.resizeHandle = null;
+    }
   }
 
   handleWheel(e) {
     e.preventDefault();
     
-    const pos = this.getMousePos(e);
-    this.zoomAt(pos.screen.x, pos.screen.y, -e.deltaY);
-    this.render();
-  }
-
-  handleMouseDown(e) {
-    const pos = this.getMousePos(e);
-    const worldX = pos.world.x;
-    const worldY = pos.world.y;
-    
-    // Middle mouse button = always pan
-    if (e.button === 1) {
-      this.startPanning(pos.screen.x, pos.screen.y);
-      e.preventDefault();
-      return;
-    }
-    
-    // Left click only
-    if (e.button !== 0) return;
-    
-    // Check resize handles first
-    if (this.selectedNode) {
-      const handle = this.selectedNode.isOnResizeHandle(worldX, worldY, this.zoom);
-      if (handle) {
-        this.startResizing(handle, worldX, worldY);
-        return;
-      }
-    }
-    
-    // Check connection endpoints for reconnection
-    const endpoint = this.getConnectionEndpointAt(worldX, worldY);
-    if (endpoint) {
-      this.startReconnecting(endpoint, worldX, worldY);
-      return;
-    }
-    
-    // Check connection points for new connection
-    for (let node of this.nodes) {
-      const connectionPoint = node.isOnConnectionPoint(worldX, worldY, this.zoom);
-      if (connectionPoint) {
-        this.startConnecting(node, connectionPoint, worldX, worldY);
-        return;
-      }
-    }
-    
-    // Check if clicked on a node
-    let clickedOnNode = false;
-    for (let node of this.nodes) {
-      if (node.containsPoint(worldX, worldY)) {
-        this.startDragging(node, worldX, worldY);
-        clickedOnNode = true;
-        return;
-      }
-    }
-    
-    // Check if clicked on a connection
-    for (let conn of this.connections) {
-      if (conn.isNearPoint(worldX, worldY, this.zoom)) {
-        this.selectConnection(conn);
-        return;
-      }
-    }
-    
-    // Clicked on empty space - start panning if not on anything
-    this.startPanning(pos.screen.x, pos.screen.y);
-    this.deselectAll();
-  }
-  
-  handleMouseMove(e) {
-    const pos = this.getMousePos(e);
-    const worldX = pos.world.x;
-    const worldY = pos.world.y;
-    
-    // Handle panning
-    if (this.isPanning) {
-      this.updatePan(pos.screen.x, pos.screen.y);
-      return;
-    }
-    
-    // Handle resizing
-    if (this.isResizing) {
-      this.updateResize(worldX, worldY);
-      return;
-    }
-    
-    // Handle reconnecting
-    if (this.isReconnecting) {
-      this.tempConnectionEnd = { x: worldX, y: worldY };
-      this.render();
-      return;
-    }
-    
-    // Handle connecting
-    if (this.isConnecting) {
-      this.tempConnectionEnd = { x: worldX, y: worldY };
-      this.render();
-      return;
-    }
-    
-    // Handle dragging
-    if (this.isDragging && this.selectedNode) {
-      this.updateDrag(worldX, worldY);
-      return;
-    }
-    
-    // Update cursor
-    this.updateCursor(worldX, worldY);
-  }
-  
-  handleMouseUp(e) {
-    const pos = this.getMousePos(e);
-    const worldX = pos.world.x;
-    const worldY = pos.world.y;
-    
-    if (this.isPanning) {
-      this.finishPanning();
-      return;
-    }
-    
-    if (this.isResizing) {
-      this.finishResizing();
-      return;
-    }
-    
-    if (this.isReconnecting) {
-      this.finishReconnecting(worldX, worldY);
-      return;
-    }
-    
-    if (this.isConnecting) {
-      this.finishConnecting(worldX, worldY);
-      return;
-    }
-    
-    if (this.isDragging) {
-      this.finishDragging();
-    }
-  }
-
-  handleDoubleClick(e) {
-    const pos = this.getMousePos(e);
-    const worldX = pos.world.x;
-    const worldY = pos.world.y;
-    
-    for (let node of this.nodes) {
-      if (node.containsPoint(worldX, worldY)) {
-        this.startEditingNode(node);
-        return;
-      }
-    }
-  }
-
-  // ============================================================================
-  // Panning
-  // ============================================================================
-
-  startPanning(screenX, screenY) {
-    this.isPanning = true;
-    this.panStartX = screenX - this.panX;
-    this.panStartY = screenY - this.panY;
-    this.canvas.style.cursor = 'grabbing';
-  }
-
-  updatePan(screenX, screenY) {
-    this.panX = screenX - this.panStartX;
-    this.panY = screenY - this.panStartY;
-    this.render();
-  }
-
-  finishPanning() {
-    this.isPanning = false;
-    this.canvas.style.cursor = 'grab';
-  }
-
-  // ============================================================================
-  // Mouse Interaction Helpers
-  // ============================================================================
-
-  startResizing(handle, x, y) {
-    this.isResizing = true;
-    this.resizeHandle = handle.position;
-    this.resizeStartWidth = this.selectedNode.width;
-    this.resizeStartHeight = this.selectedNode.height;
-    this.resizeStartX = x;
-    this.resizeStartY = y;
-    this.resizeStartNodeX = this.selectedNode.x;
-    this.resizeStartNodeY = this.selectedNode.y;
-    this.canvas.style.cursor = this.getResizeCursor(handle.position);
-  }
-
-  updateResize(x, y) {
-    const dx = x - this.resizeStartX;
-    const dy = y - this.resizeStartY;
-    const minWidth = 60;
-    const minHeight = 40;
-    
-    switch(this.resizeHandle) {
-      case 'top-left':
-        const newWidth_tl = Math.max(minWidth, this.resizeStartWidth - dx);
-        const newHeight_tl = Math.max(minHeight, this.resizeStartHeight - dy);
-        const actualDx_tl = this.resizeStartWidth - newWidth_tl;
-        const actualDy_tl = this.resizeStartHeight - newHeight_tl;
-        this.selectedNode.width = newWidth_tl;
-        this.selectedNode.height = newHeight_tl;
-        this.selectedNode.x = this.resizeStartNodeX - actualDx_tl / 2;
-        this.selectedNode.y = this.resizeStartNodeY - actualDy_tl / 2;
-        break;
-        
-      case 'top-right':
-        const newWidth_tr = Math.max(minWidth, this.resizeStartWidth + dx);
-        const newHeight_tr = Math.max(minHeight, this.resizeStartHeight - dy);
-        const actualDx_tr = newWidth_tr - this.resizeStartWidth;
-        const actualDy_tr = this.resizeStartHeight - newHeight_tr;
-        this.selectedNode.width = newWidth_tr;
-        this.selectedNode.height = newHeight_tr;
-        this.selectedNode.x = this.resizeStartNodeX + actualDx_tr / 2;
-        this.selectedNode.y = this.resizeStartNodeY - actualDy_tr / 2;
-        break;
-        
-      case 'bottom-right':
-        const newWidth_br = Math.max(minWidth, this.resizeStartWidth + dx);
-        const newHeight_br = Math.max(minHeight, this.resizeStartHeight + dy);
-        const actualDx_br = newWidth_br - this.resizeStartWidth;
-        const actualDy_br = newHeight_br - this.resizeStartHeight;
-        this.selectedNode.width = newWidth_br;
-        this.selectedNode.height = newHeight_br;
-        this.selectedNode.x = this.resizeStartNodeX + actualDx_br / 2;
-        this.selectedNode.y = this.resizeStartNodeY + actualDy_br / 2;
-        break;
-        
-      case 'bottom-left':
-        const newWidth_bl = Math.max(minWidth, this.resizeStartWidth - dx);
-        const newHeight_bl = Math.max(minHeight, this.resizeStartHeight + dy);
-        const actualDx_bl = this.resizeStartWidth - newWidth_bl;
-        const actualDy_bl = newHeight_bl - this.resizeStartHeight;
-        this.selectedNode.width = newWidth_bl;
-        this.selectedNode.height = newHeight_bl;
-        this.selectedNode.x = this.resizeStartNodeX - actualDx_bl / 2;
-        this.selectedNode.y = this.resizeStartNodeY + actualDy_bl / 2;
-        break;
-    }
-    
-    this.render();
-  }
-
-  finishResizing() {
-    this.isResizing = false;
-    this.resizeHandle = null;
-    this.canvas.style.cursor = 'move';
-    this.saveState();
-  }
-
-  startReconnecting(endpoint, x, y) {
-    this.isReconnecting = true;
-    this.reconnectingConnection = endpoint.connection;
-    this.reconnectingEnd = endpoint.endpoint;
-    this.tempConnectionEnd = { x, y };
-    this.canvas.style.cursor = 'crosshair';
-    this.selectedConnection = endpoint.connection;
-    this.selectedNode = null;
-    this.render();
-  }
-
-  finishReconnecting(x, y) {
-    for (let node of this.nodes) {
-      if (node.containsPoint(x, y)) {
-        const closestPoint = node.getClosestConnectionPoint(x, y);
-        
-        if (this.reconnectingEnd === 'start') {
-          if (node !== this.reconnectingConnection.toNode) {
-            this.reconnectingConnection.fromNode = node;
-            this.reconnectingConnection.fromPort = closestPoint.position;
-            this.saveState();
-          }
-        } else {
-          if (node !== this.reconnectingConnection.fromNode) {
-            this.reconnectingConnection.toNode = node;
-            this.reconnectingConnection.toPort = closestPoint.position;
-            this.saveState();
-          }
-        }
-        break;
-      }
-    }
-    
-    this.isReconnecting = false;
-    this.reconnectingConnection = null;
-    this.reconnectingEnd = null;
-    this.tempConnectionEnd = null;
-    this.canvas.style.cursor = 'grab';
-    this.render();
-  }
-
-  startConnecting(node, connectionPoint, x, y) {
-    this.isConnecting = true;
-    this.connectionStart = node;
-    this.connectionStartPort = connectionPoint.position;
-    this.tempConnectionEnd = { x, y };
-    this.canvas.style.cursor = 'crosshair';
-  }
-
-  finishConnecting(x, y) {
-    // Look for a node at the drop location
-    for (let node of this.nodes) {
-      if (node !== this.connectionStart && node.containsPoint(x, y)) {
-        const closestPoint = node.getClosestConnectionPoint(x, y);
-        // This will create a NEW connection (multiple connections allowed)
-        this.addConnection(
-          this.connectionStart, 
-          this.connectionStartPort,
-          node,
-          closestPoint.position
-        );
-        break;
-      }
-    }
-    
-    this.isConnecting = false;
-    this.connectionStart = null;
-    this.connectionStartPort = null;
-    this.tempConnectionEnd = null;
-    this.canvas.style.cursor = 'grab';
-    this.render();
-  }
-
-  startDragging(node, x, y) {
-    this.selectedNode = node;
-    this.selectedConnection = null;
-    this.isDragging = true;
-    this.dragOffsetX = x - node.x;
-    this.dragOffsetY = y - node.y;
-    this.canvas.style.cursor = 'grabbing';
-    this.render();
-  }
-
-  updateDrag(x, y) {
-    this.selectedNode.x = x - this.dragOffsetX;
-    this.selectedNode.y = y - this.dragOffsetY;
-    this.render();
-  }
-
-  finishDragging() {
-    this.isDragging = false;
-    this.canvas.style.cursor = 'move';
-    this.saveState();
-  }
-
-  selectConnection(conn) {
-    this.selectedConnection = conn;
-    this.selectedNode = null;
-    this.render();
-  }
-
-  deselectAll() {
-    this.selectedNode = null;
-    this.selectedConnection = null;
-    this.render();
-  }
-
-  updateCursor(x, y) {
-    // Don't change cursor during active operations
-    if (this.isPanning || this.isDragging || this.isConnecting || this.isReconnecting || this.isResizing) {
-      return;
-    }
-    
-    // Check if hovering over resize handles
-    if (this.selectedNode) {
-      const handle = this.selectedNode.isOnResizeHandle(x, y, this.zoom);
-      if (handle) {
-        this.canvas.style.cursor = this.getResizeCursor(handle.position);
-        return;
-      }
-      
-      // Check if hovering over connection points
-      if (this.selectedNode.isOnConnectionPoint(x, y, this.zoom)) {
-        this.canvas.style.cursor = 'pointer';
-        return;
-      }
-    }
-    
-    // Check if hovering over any connection points
-    for (let node of this.nodes) {
-      if (node.isOnConnectionPoint(x, y, this.zoom)) {
-        this.canvas.style.cursor = 'pointer';
-        return;
-      }
-    }
-    
-    // Check if hovering over connection endpoints
-    const endpoint = this.getConnectionEndpointAt(x, y);
-    if (endpoint) {
-      this.canvas.style.cursor = 'pointer';
-      return;
-    }
-    
-    // Check if hovering over a node
-    for (let node of this.nodes) {
-      if (node.containsPoint(x, y)) {
-        this.canvas.style.cursor = 'move';
-        return;
-      }
-    }
-    
-    // Check if hovering over a connection
-    for (let conn of this.connections) {
-      if (conn.isNearPoint(x, y, this.zoom)) {
-        this.canvas.style.cursor = 'pointer';
-        return;
-      }
-    }
-    
-    // Default: empty space (can pan)
-    this.canvas.style.cursor = 'grab';
-  }
-
-  getResizeCursor(position) {
-    switch(position) {
-      case 'top-left':
-      case 'bottom-right':
-        return 'nwse-resize';
-      case 'top-right':
-      case 'bottom-left':
-        return 'nesw-resize';
-      default:
-        return 'default';
-    }
-  }
-
-  // ============================================================================
-  // Text Editing
-  // ============================================================================
-
-  startEditingNode(node) {
-    this.editingNode = node;
-    this.originalNodeText = node.text;
-    
-    node.text = '';
-    this.render();
-    
-    const screenPos = this.worldToScreen(node.x, node.y);
     const rect = this.canvas.getBoundingClientRect();
-    const scaleX = rect.width / this.logicalWidth;
-    const scaleY = rect.height / this.logicalHeight;
-    
-    this.textInput = document.createElement('input');
-    this.textInput.type = 'text';
-    this.textInput.value = '';
-    this.textInput.style.cssText = `
-      position: absolute;
-      left: ${rect.left + (screenPos.x - node.width * this.zoom / 2 + 10 * this.zoom) * scaleX}px;
-      top: ${rect.top + (screenPos.y - 10 * this.zoom) * scaleY}px;
-      width: ${(node.width - 20) * this.zoom * scaleX}px;
-      height: 20px;
-      font-size: ${14 * this.zoom}px;
-      font-family: Arial;
-      text-align: center;
-      padding: 4px;
-      margin: 0;
-      border: none !important;
-      outline: none !important;
-      background: transparent;
-      color: #000;
-      z-index: 1000;
-    `;
-    
-    document.body.appendChild(this.textInput);
-    this.textInput.focus();
-    
-    this.textInput.addEventListener('blur', () => this.finishEditingNode());
-    this.textInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        this.finishEditingNode();
-      } else if (e.key === 'Escape') {
-        this.cancelEditingNode();
-      }
-    });
-  }
+    const mouseX = (e.clientX - rect.left) * (this.canvas.width / this.options.pixelRatio / rect.width);
+    const mouseY = (e.clientY - rect.top) * (this.canvas.height / this.options.pixelRatio / rect.height);
 
-  finishEditingNode() {
-    if (this.editingNode && this.textInput) {
-      if (this.textInput.value.trim() === '') {
-        this.editingNode.text = this.originalNodeText;
-      } else {
-        this.editingNode.text = this.textInput.value;
-      }
-      
-      document.body.removeChild(this.textInput);
-      this.textInput = null;
-      this.editingNode = null;
-      this.originalNodeText = null;
-      this.render();
-      this.saveState();
-    }
-  }
+    const worldX = (mouseX - this.panOffset.x) / this.zoom;
+    const worldY = (mouseY - this.panOffset.y) / this.zoom;
 
-  cancelEditingNode() {
-    if (this.textInput) {
-      if (this.editingNode && this.originalNodeText !== undefined) {
-        this.editingNode.text = this.originalNodeText;
-      }
-      
-      document.body.removeChild(this.textInput);
-      this.textInput = null;
-      this.editingNode = null;
-      this.originalNodeText = null;
-      this.render();
-    }
-  }
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+    const newZoom = Math.max(0.1, Math.min(5, this.zoom * zoomFactor));
 
-  // ============================================================================
-  // Keyboard Event Handler
-  // ============================================================================
+    this.panOffset.x = mouseX - worldX * newZoom;
+    this.panOffset.y = mouseY - worldY * newZoom;
+    this.zoom = newZoom;
+
+    this.render();
+  }
 
   handleKeyDown(e) {
-    if (this.editingNode) {
-      return;
-    }
-    
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
-    
-    // Reset view
-    if (ctrlKey && e.key === '0') {
-      this.resetView();
+    if (this.options.mode !== 'edit') return;
+
+    // Space key for panning
+    if (e.code === 'Space' && !this.spacePressed) {
       e.preventDefault();
+      this.spacePressed = true;
+      if (!this.draggingNode && !this.draggingArea && !this.resizingNode && !this.resizingArea) {
+        this.canvas.style.cursor = 'grab';
+      }
       return;
     }
-    
-    // Fit to content
-    if (ctrlKey && e.key === '1') {
-      this.fitToContent();
-      e.preventDefault();
-      return;
-    }
-    
-    if (ctrlKey && e.key === 'z' && !e.shiftKey) {
-      this.undo();
-      e.preventDefault();
-      return;
-    }
-    
-    if (ctrlKey && e.key === 'z' && e.shiftKey) {
-      this.redo();
-      e.preventDefault();
-      return;
-    }
-    
-    if (!isMac && ctrlKey && e.key === 'y') {
-      this.redo();
-      e.preventDefault();
-      return;
-    }
-    
-    if (ctrlKey && e.key === 'c') {
-      this.copySelected();
-      e.preventDefault();
-      return;
-    }
-    
-    if (ctrlKey && e.key === 'v') {
-      this.paste();
-      e.preventDefault();
-      return;
-    }
-    
+
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (this.selectedNode) {
-        this.deleteNode(this.selectedNode);
-        e.preventDefault();
+        this.connections = this.connections.filter(conn => 
+          conn.fromNode !== this.selectedNode && conn.toNode !== this.selectedNode
+        );
+        this.nodes = this.nodes.filter(node => node !== this.selectedNode);
+        this.selectedNode = null;
+        this.saveState();
+        this.render();
       } else if (this.selectedConnection) {
-        this.deleteConnection(this.selectedConnection);
-        e.preventDefault();
+        this.connections = this.connections.filter(conn => conn !== this.selectedConnection);
+        this.selectedConnection = null;
+        this.saveState();
+        this.render();
+      } else if (this.selectedArea) {
+        this.areas = this.areas.filter(area => area !== this.selectedArea);
+        this.selectedArea = null;
+        this.saveState();
+        this.render();
+      }
+    }
+
+    // Ctrl+Z or Cmd+Z for undo
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      this.undo();
+    }
+
+    // Ctrl+Shift+Z or Cmd+Shift+Z for redo
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+      e.preventDefault();
+      this.redo();
+    }
+
+    // Ctrl+Y or Cmd+Y for redo (alternative)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+      e.preventDefault();
+      this.redo();
+    }
+
+    if (e.key === 'Escape') {
+      if (this.markingArea) {
+        this.markingArea = false;
+        this.areaStart = null;
+        this.areaEnd = null;
+        this.canvas.style.cursor = 'default';
+        
+        // Trigger callback to update button state
+        if (this.onAreaMarkingComplete) {
+          this.onAreaMarkingComplete();
+        }
+        
+        this.render();
       }
     }
   }
 
   handleKeyUp(e) {
-    // Handle key releases if needed
+    // Release Space key
+    if (e.code === 'Space') {
+      this.spacePressed = false;
+      if (!this.isPanning) {
+        this.canvas.style.cursor = 'default';
+      }
+    }
   }
 
-  // ============================================================================
-  // History Management (Undo/Redo)
-  // ============================================================================
+  addNode(type, text, x, y) {
+    const node = new Node(`node_${this.nodeIdCounter++}`, type, x, y, text);
+    this.nodes.push(node);
+    this.saveState();
+    this.render();
+    return node;
+  }
+
+  startAreaMarking() {
+    this.markingArea = true;
+    this.areaStart = null;
+    this.areaEnd = null;
+    this.selectedNode = null;
+    this.selectedConnection = null;
+    this.selectedArea = null;
+    this.canvas.style.cursor = 'crosshair';
+    this.render();
+  }
+
+  openAreaSettings(area, cursorX, cursorY) {
+    this.areaSettingsDialog.show(area, cursorX, cursorY);
+  }
+
+  openNodeSettings(node, cursorX, cursorY) {
+    this.nodeSettingsDialog.show(node, cursorX, cursorY);
+  }
 
   saveState() {
-    this.history = this.history.slice(0, this.historyIndex + 1);
-    
     const state = {
       nodes: this.nodes.map(node => ({
         id: node.id,
@@ -1571,7 +1908,13 @@ class FlowchartCanvas {
         y: node.y,
         text: node.text,
         width: node.width,
-        height: node.height
+        height: node.height,
+        link: node.link,
+        fillColor: node.fillColor,
+        fontColor: node.fontColor,
+        fontSize: node.fontSize,
+        outlineColor: node.outlineColor,
+        outlineWidth: node.outlineWidth
       })),
       connections: this.connections.map(conn => ({
         id: conn.id,
@@ -1579,49 +1922,28 @@ class FlowchartCanvas {
         fromPort: conn.fromPort,
         toNodeId: conn.toNode.id,
         toPort: conn.toPort
+      })),
+      areas: this.areas.map(area => ({
+        id: area.id,
+        x1: area.x1,
+        y1: area.y1,
+        x2: area.x2,
+        y2: area.y2,
+        title: area.title,
+        fillColor: area.fillColor,
+        outlineColor: area.outlineColor,
+        titleBgColor: area.titleBgColor
       }))
     };
-    
-    this.history.push(state);
-    
-    if (this.history.length > this.maxHistorySize) {
-      this.history.shift();
-    } else {
-      this.historyIndex++;
-    }
-  }
 
-  restoreState(state) {
-    this.nodes = [];
-    this.connections = [];
-    this.selectedNode = null;
-    this.selectedConnection = null;
-    
-    const nodeMap = new Map();
-    state.nodes.forEach(nodeData => {
-      const node = new Node(nodeData.id, nodeData.type, nodeData.x, nodeData.y, nodeData.text);
-      node.width = nodeData.width;
-      node.height = nodeData.height;
-      this.nodes.push(node);
-      nodeMap.set(nodeData.id, node);
-    });
-    
-    const maxNodeId = Math.max(0, ...state.nodes.map(n => parseInt(n.id.split('-')[1]) || 0));
-    this.nodeIdCounter = maxNodeId + 1;
-    
-    state.connections.forEach(connData => {
-      const fromNode = nodeMap.get(connData.fromNodeId);
-      const toNode = nodeMap.get(connData.toNodeId);
-      if (fromNode && toNode) {
-        const conn = new Connection(connData.id, fromNode, connData.fromPort, toNode, connData.toPort);
-        this.connections.push(conn);
-      }
-    });
-    
-    const maxConnId = Math.max(0, ...state.connections.map(c => parseInt(c.id.split('-')[1]) || 0));
-    this.connectionIdCounter = maxConnId + 1;
-    
-    this.render();
+    this.history = this.history.slice(0, this.historyIndex + 1);
+    this.history.push(JSON.stringify(state));
+    this.historyIndex++;
+
+    if (this.history.length > 50) {
+      this.history.shift();
+      this.historyIndex--;
+    }
   }
 
   undo() {
@@ -1638,44 +1960,151 @@ class FlowchartCanvas {
     }
   }
 
-  // ============================================================================
-  // Copy/Paste
-  // ============================================================================
+  restoreState(stateStr) {
+    const state = JSON.parse(stateStr);
+    
+    this.nodes = state.nodes.map(nodeData => {
+      const node = new Node(nodeData.id, nodeData.type, nodeData.x, nodeData.y, nodeData.text);
+      node.width = nodeData.width;
+      node.height = nodeData.height;
+      node.link = nodeData.link || '';
+      node.fillColor = nodeData.fillColor || '#FFFFFF';
+      node.fontColor = nodeData.fontColor || '#000000';
+      node.fontSize = nodeData.fontSize || 14;
+      node.outlineColor = nodeData.outlineColor || '#000000';
+      node.outlineWidth = nodeData.outlineWidth || 2;
+      return node;
+    });
 
-  copySelected() {
-    if (this.selectedNode) {
-      this.clipboard = {
-        type: 'node',
-        data: {
-          type: this.selectedNode.type,
-          text: this.selectedNode.text,
-          width: this.selectedNode.width,
-          height: this.selectedNode.height
-        }
-      };
-    }
+    this.connections = state.connections.map(connData => {
+      const fromNode = this.nodes.find(n => n.id === connData.fromNodeId);
+      const toNode = this.nodes.find(n => n.id === connData.toNodeId);
+      return new Connection(connData.id, fromNode, connData.fromPort, toNode, connData.toPort);
+    });
+
+    this.areas = (state.areas || []).map(areaData => {
+      const area = new Area(areaData.id, areaData.x1, areaData.y1, areaData.x2, areaData.y2, areaData.title);
+      area.fillColor = areaData.fillColor || 'rgba(33, 150, 243, 0.1)';
+      area.outlineColor = areaData.outlineColor || '#2196F3';
+      area.titleBgColor = areaData.titleBgColor || '#2196F3';
+      return area;
+    });
+
+    this.selectedNode = null;
+    this.selectedConnection = null;
+    this.selectedArea = null;
+    this.render();
   }
 
-  paste() {
-    if (this.clipboard && this.clipboard.type === 'node') {
-      const data = this.clipboard.data;
-      const newNode = this.addNode(
-        data.type,
-        data.text,
-        this.selectedNode ? this.selectedNode.x + 30 : undefined,
-        this.selectedNode ? this.selectedNode.y + 30 : undefined
-      );
-      newNode.width = data.width;
-      newNode.height = data.height;
+  clear() {
+    this.nodes = [];
+    this.connections = [];
+    this.areas = [];
+    this.selectedNode = null;
+    this.selectedConnection = null;
+    this.selectedArea = null;
+    this.history = [];
+    this.historyIndex = -1;
+    this.nodeIdCounter = 1;
+    this.connectionIdCounter = 1;
+    this.areaIdCounter = 1;
+    this.render();
+  }
+
+  drawGrid() {
+    const gridSize = 20; // Grid spacing
+    const width = this.canvas.width / this.options.pixelRatio / this.zoom;
+    const height = this.canvas.height / this.options.pixelRatio / this.zoom;
+    
+    // Calculate visible area in world coordinates
+    const startX = Math.floor(-this.panOffset.x / this.zoom / gridSize) * gridSize;
+    const startY = Math.floor(-this.panOffset.y / this.zoom / gridSize) * gridSize;
+    const endX = startX + width + gridSize;
+    const endY = startY + height + gridSize;
+
+    this.ctx.strokeStyle = '#e0e0e0';
+    this.ctx.lineWidth = 0.5;
+    this.ctx.beginPath();
+
+    // Draw vertical lines
+    for (let x = startX; x < endX; x += gridSize) {
+      this.ctx.moveTo(x, startY);
+      this.ctx.lineTo(x, endY);
+    }
+
+    // Draw horizontal lines
+    for (let y = startY; y < endY; y += gridSize) {
+      this.ctx.moveTo(startX, y);
+      this.ctx.lineTo(endX, y);
+    }
+
+    this.ctx.stroke();
+  }
+
+  render() {
+    const width = this.canvas.width / this.options.pixelRatio;
+    const height = this.canvas.height / this.options.pixelRatio;
+
+    this.ctx.clearRect(0, 0, width, height);
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillRect(0, 0, width, height);
+
+    this.ctx.save();
+    this.ctx.translate(this.panOffset.x, this.panOffset.y);
+    this.ctx.scale(this.zoom, this.zoom);
+
+    // Draw grid lines
+    this.drawGrid();
+
+    // Draw areas first (behind everything)
+    this.areas.forEach(area => {
+      area.draw(this.ctx, area === this.selectedArea);
+    });
+
+    // Draw area marking preview
+    if (this.markingArea && this.areaStart && this.areaEnd) {
+      const x1 = Math.min(this.areaStart.x, this.areaEnd.x);
+      const y1 = Math.min(this.areaStart.y, this.areaEnd.y);
+      const x2 = Math.max(this.areaStart.x, this.areaEnd.x);
+      const y2 = Math.max(this.areaStart.y, this.areaEnd.y);
       
-      this.selectedNode = newNode;
-      this.saveState();
+      this.ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
+      this.ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+      
+      this.ctx.strokeStyle = '#2196F3';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      this.ctx.setLineDash([]);
     }
-  }
 
-  // ============================================================================
-  // Export/Import
-  // ============================================================================
+    this.connections.forEach(conn => {
+      conn.draw(this.ctx, conn === this.selectedConnection);
+    });
+
+    this.nodes.forEach(node => {
+      node.draw(this.ctx, node === this.selectedNode);
+    });
+
+    if (this.connectingFrom && this.connectingTo) {
+      this.ctx.strokeStyle = '#2196F3';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.beginPath();
+      this.ctx.moveTo(this.connectingFrom.point.x, this.connectingFrom.point.y);
+      
+      if (this.connectingTo.node) {
+        this.ctx.lineTo(this.connectingTo.point.x, this.connectingTo.point.y);
+      } else {
+        this.ctx.lineTo(this.connectingTo.x, this.connectingTo.y);
+      }
+      
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
+    }
+
+    this.ctx.restore();
+  }
 
   exportToJSON() {
     const data = {
@@ -1686,7 +2115,13 @@ class FlowchartCanvas {
         y: node.y,
         text: node.text,
         width: node.width,
-        height: node.height
+        height: node.height,
+        link: node.link,
+        fillColor: node.fillColor,
+        fontColor: node.fontColor,
+        fontSize: node.fontSize,
+        outlineColor: node.outlineColor,
+        outlineWidth: node.outlineWidth
       })),
       connections: this.connections.map(conn => ({
         id: conn.id,
@@ -1694,74 +2129,146 @@ class FlowchartCanvas {
         fromPort: conn.fromPort,
         toNodeId: conn.toNode.id,
         toPort: conn.toPort
+      })),
+      areas: this.areas.map(area => ({
+        id: area.id,
+        x1: area.x1,
+        y1: area.y1,
+        x2: area.x2,
+        y2: area.y2,
+        title: area.title,
+        fillColor: area.fillColor,
+        outlineColor: area.outlineColor,
+        titleBgColor: area.titleBgColor
       }))
     };
     return JSON.stringify(data, null, 2);
   }
 
-  importFromJSON(jsonString) {
-    const data = JSON.parse(jsonString);
-    this.clear();
+  importFromJSON(jsonStr) {
+    const data = JSON.parse(jsonStr);
     
-    const nodeMap = new Map();
-    data.nodes.forEach(nodeData => {
+    this.nodes = data.nodes.map(nodeData => {
       const node = new Node(nodeData.id, nodeData.type, nodeData.x, nodeData.y, nodeData.text);
       node.width = nodeData.width;
       node.height = nodeData.height;
-      this.nodes.push(node);
-      nodeMap.set(nodeData.id, node);
+      node.link = nodeData.link || '';
+      node.fillColor = nodeData.fillColor || '#FFFFFF';
+      node.fontColor = nodeData.fontColor || '#000000';
+      node.fontSize = nodeData.fontSize || 14;
+      node.outlineColor = nodeData.outlineColor || '#000000';
+      node.outlineWidth = nodeData.outlineWidth || 2;
+      return node;
     });
-    
-    const maxNodeId = Math.max(0, ...data.nodes.map(n => parseInt(n.id.split('-')[1]) || 0));
-    this.nodeIdCounter = maxNodeId + 1;
-    
-    data.connections.forEach(connData => {
-      const fromNode = nodeMap.get(connData.fromNodeId);
-      const toNode = nodeMap.get(connData.toNodeId);
-      if (fromNode && toNode) {
-        const conn = new Connection(connData.id, fromNode, connData.fromPort, toNode, connData.toPort);
-        this.connections.push(conn);
-      }
+
+    this.connections = data.connections.map(connData => {
+      const fromNode = this.nodes.find(n => n.id === connData.fromNodeId);
+      const toNode = this.nodes.find(n => n.id === connData.toNodeId);
+      return new Connection(connData.id, fromNode, connData.fromPort, toNode, connData.toPort);
     });
-    
-    const maxConnId = Math.max(0, ...data.connections.map(c => parseInt(c.id.split('-')[1]) || 0));
-    this.connectionIdCounter = maxConnId + 1;
-    
+
+    this.areas = (data.areas || []).map(areaData => {
+      const area = new Area(areaData.id, areaData.x1, areaData.y1, areaData.x2, areaData.y2, areaData.title);
+      area.fillColor = areaData.fillColor || 'rgba(33, 150, 243, 0.1)';
+      area.outlineColor = areaData.outlineColor || '#2196F3';
+      area.titleBgColor = areaData.titleBgColor || '#2196F3';
+      return area;
+    });
+
+    this.nodeIdCounter = Math.max(...this.nodes.map(n => parseInt(n.id.split('_')[1]) || 0), 0) + 1;
+    this.connectionIdCounter = Math.max(...this.connections.map(c => parseInt(c.id.split('_')[1]) || 0), 0) + 1;
+    this.areaIdCounter = Math.max(...this.areas.map(a => parseInt(a.id.split('_')[1]) || 0), 0) + 1;
+
+    this.saveState();
     this.render();
   }
 
   exportToPNG() {
-    return this.canvas.toDataURL('image/png');
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    this.areas.forEach(area => {
+      minX = Math.min(minX, area.x1);
+      minY = Math.min(minY, area.y1 - 30);
+      maxX = Math.max(maxX, area.x2);
+      maxY = Math.max(maxY, area.y2);
+    });
+
+    this.nodes.forEach(node => {
+      minX = Math.min(minX, node.x - node.width / 2);
+      minY = Math.min(minY, node.y - node.height / 2);
+      maxX = Math.max(maxX, node.x + node.width / 2);
+      maxY = Math.max(maxY, node.y + node.height / 2);
+    });
+
+    const padding = 50;
+    const width = maxX - minX + padding * 2;
+    const height = maxY - minY + padding * 2;
+
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+
+    tempCtx.fillStyle = '#ffffff';
+    tempCtx.fillRect(0, 0, width, height);
+
+    tempCtx.translate(-minX + padding, -minY + padding);
+
+    this.areas.forEach(area => area.draw(tempCtx, false));
+    this.connections.forEach(conn => conn.draw(tempCtx, false));
+    this.nodes.forEach(node => node.draw(tempCtx, false));
+
+    return tempCanvas.toDataURL('image/png');
   }
 
-  // ============================================================================
-  // Cleanup
-  // ============================================================================
+  exportToPDF() {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('l', 'pt', 'a4');
+
+    const imgData = this.exportToPNG();
+    const imgProps = pdf.getImageProperties(imgData);
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    return pdf;
+  }
+
+  async downloadZip() {
+    if (typeof JSZip === 'undefined') {
+      console.error('JSZip is not loaded');
+      alert('JSZip library is required for this feature. Please include it in your HTML.');
+      return;
+    }
+
+    const zip = new JSZip();
+
+    zip.file('flowchart.json', this.exportToJSON());
+
+    const pngData = this.exportToPNG();
+    const pngBlob = await fetch(pngData).then(r => r.blob());
+    zip.file('flowchart.png', pngBlob);
+
+    const pdf = this.exportToPDF();
+    const pdfBlob = pdf.output('blob');
+    zip.file('flowchart.pdf', pdfBlob);
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'flowchart.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   destroy() {
-    // Clean up event listeners
-    if (this.canvas) {
-      this.canvas.removeEventListener('mousedown', this.handleMouseDown);
-      this.canvas.removeEventListener('mousemove', this.handleMouseMove);
-      this.canvas.removeEventListener('mouseup', this.handleMouseUp);
-      this.canvas.removeEventListener('dblclick', this.handleDoubleClick);
-      this.canvas.removeEventListener('wheel', this.handleWheel);
-      this.canvas.removeEventListener('contextmenu', (e) => e.preventDefault());
+    if (this.nodeSettingsDialog) {
+      this.nodeSettingsDialog.destroy();
     }
-    
-    document.removeEventListener('keydown', this.handleKeyDown);
-    document.removeEventListener('keyup', this.handleKeyUp);
-    
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-    }
-    
-    if (this.textInput && document.body.contains(this.textInput)) {
-      document.body.removeChild(this.textInput);
-    }
-    
-    if (this.canvas) {
-      this.canvas.remove();
+    if (this.canvas && this.canvas.parentNode) {
+      this.canvas.parentNode.removeChild(this.canvas);
     }
   }
 }
@@ -1777,8 +2284,10 @@ if (typeof window !== 'undefined') {
 module.exports = {
   Canvas: FlowchartCanvas,
   Node: Node,
-  Connection: Connection
+  Connection: Connection,
+  Area: Area,
+  NodeSettingsDialog: NodeSettingsDialog,
+  AreaSettingsDialog: AreaSettingsDialog
 };
 
-// Default export
 module.exports.default = module.exports;

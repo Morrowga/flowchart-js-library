@@ -8,10 +8,22 @@ node_modules/
 # Build files
 build.js
 
-# Documentation
+# Documentation (keep only README.md)
 *.md
 !README.md
 
 # OS files
 .DS_Store
 Thumbs.db
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+test/
+*.test.js
+coverage/

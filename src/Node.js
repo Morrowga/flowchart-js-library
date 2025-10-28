@@ -1,5 +1,5 @@
 // src/Node.js
-// Represents a single flowchart node with zoom support
+// Represents a single flowchart node with zoom support and customizable properties
 
 class Node {
   constructor(id, type, x, y, text = '') {
@@ -11,6 +11,14 @@ class Node {
     this.width = 120;
     this.height = 60;
     this.selected = false;
+    
+    // Customizable properties with default values
+    this.link = '';  // URL link (blank)
+    this.fillColor = '#FFFFFF';  // White
+    this.fontColor = '#000000';  // Black
+    this.fontSize = 14;  // Normal
+    this.outlineColor = '#000000';  // Black
+    this.outlineWidth = 2;
   }
   
   // ============================================================================
@@ -98,16 +106,42 @@ class Node {
   }
 
   // ============================================================================
+  // Settings Methods
+  // ============================================================================
+  
+  updateSettings(settings) {
+    if (settings.text !== undefined) this.text = settings.text;
+    if (settings.link !== undefined) this.link = settings.link;
+    if (settings.fillColor !== undefined) this.fillColor = settings.fillColor;
+    if (settings.fontColor !== undefined) this.fontColor = settings.fontColor;
+    if (settings.fontSize !== undefined) this.fontSize = settings.fontSize;
+    if (settings.outlineColor !== undefined) this.outlineColor = settings.outlineColor;
+    if (settings.outlineWidth !== undefined) this.outlineWidth = settings.outlineWidth;
+  }
+
+  getSettings() {
+    return {
+      text: this.text,
+      link: this.link,
+      fillColor: this.fillColor,
+      fontColor: this.fontColor,
+      fontSize: this.fontSize,
+      outlineColor: this.outlineColor,
+      outlineWidth: this.outlineWidth
+    };
+  }
+
+  // ============================================================================
   // Drawing Methods
   // ============================================================================
   
   draw(ctx, isSelected = false) {
     ctx.save();
     
-    // Set styles
-    ctx.fillStyle = this.getFillColor();
-    ctx.strokeStyle = isSelected ? '#2196F3' : '#333';
-    ctx.lineWidth = isSelected ? 3 : 2;
+    // Set styles using custom properties
+    ctx.fillStyle = this.fillColor;
+    ctx.strokeStyle = isSelected ? '#2196F3' : this.outlineColor;
+    ctx.lineWidth = isSelected ? 3 : this.outlineWidth;
     
     // Draw shape based on type
     switch(this.type) {
@@ -125,7 +159,7 @@ class Node {
         this.drawRectangle(ctx);
     }
     
-    // Draw text
+    // Draw text with custom properties
     this.drawText(ctx);
 
     // Draw connection points
@@ -182,11 +216,20 @@ class Node {
   }
   
   drawText(ctx) {
-    ctx.fillStyle = '#000';
-    ctx.font = '14px Arial';
+    ctx.fillStyle = this.fontColor;
+    ctx.font = `${this.fontSize}px Arial`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(this.text, this.x, this.y);
+    
+    // Handle multi-line text
+    const lines = this.text.split('\n');
+    const lineHeight = this.fontSize * 1.2;
+    const totalHeight = lines.length * lineHeight;
+    const startY = this.y - totalHeight / 2 + lineHeight / 2;
+    
+    lines.forEach((line, index) => {
+      ctx.fillText(line, this.x, startY + index * lineHeight);
+    });
   }
 
   drawConnectionPoints(ctx) {
@@ -297,13 +340,7 @@ class Node {
   // ============================================================================
   
   getFillColor() {
-    switch(this.type) {
-      case 'start': return '#90EE90';  // Light green
-      case 'end': return '#FFB6C1';     // Light pink
-      case 'process': return '#87CEEB'; // Light blue
-      case 'decision': return '#FFD700'; // Gold
-      default: return '#FFF';
-    }
+    return this.fillColor;
   }
 }
 
