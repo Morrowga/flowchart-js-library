@@ -1,6 +1,6 @@
 {
   "name": "@thihaeung/flowchart-lib",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A lightweight flowchart library for creating interactive flowcharts",
   "main": "dist/flowchart-lib.js",
   "module": "dist/flowchart-lib.esm.js",
